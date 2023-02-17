@@ -135,11 +135,12 @@ void read_via_buffer(
   }
 }
 
-int main(int argc, char** argv) {
+int main(int argc, char** argv) { try {
   using clock = std::chrono::system_clock;
   using time  = std::chrono::time_point<clock>;
   const time start = clock::now();
-try {
+
+  if (argc!=2) error("missing argument");
 
   float lumi = 0;
   std::string_view var;
