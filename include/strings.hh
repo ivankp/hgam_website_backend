@@ -25,10 +25,10 @@ inline auto to_string_view(const T& x) noexcept {
   if constexpr (std::is_same_v<T,char>)
     return std::string_view(&x,1);
 #ifdef IVAN_NUMCONV_HH
-  else if constexpr (requires { xtos(x); })
+  else if constexpr (std::is_invocable_v<xtos,const T&>)
     return xtos(x);
 #endif
-  else if constexpr (requires { std::string_view(x); })
+  else if constexpr (std::is_convertible_v<const T&,std::string_view>)
     return std::string_view(x);
   else
     return failed_string_view_conversion<T>{};
@@ -51,10 +51,12 @@ inline std::string cat(char x) noexcept { return std::string(1,x); }
 inline std::string cat(std::string_view x) noexcept { return std::string(x); }
 
 template <typename... T>
-requires ( (sizeof...(T) > 1) && (impl::is_sv<T> && ...) )
 [[nodiscard]]
 [[gnu::always_inline]]
-inline std::string cat(T... x) {
+inline std::enable_if_t<
+  ( (sizeof...(T) > 1) && (impl::is_sv<T> && ...) ),
+  std::string
+> cat(T... x) {
   std::string s((x.size() + ...),{});
   char* p = s.data();
   ( ( memcpy(p, x.data(), x.size()), p += x.size() ), ...);
@@ -62,10 +64,12 @@ inline std::string cat(T... x) {
 }
 
 template <typename... T>
-requires ( (sizeof...(T) > 1) && !(impl::is_sv<T> && ...) )
 [[nodiscard]]
 [[gnu::always_inline]]
-inline std::string cat(const T&... x) {
+inline std::enable_if_t<
+  ( (sizeof...(T) > 1) && !(impl::is_sv<T> && ...) ),
+  std::string
+> cat(const T&... x) {
   return cat(static_cast<std::string_view>(impl::to_string_view(x))...);
 }
 

@@ -19,7 +19,8 @@
 using std::cout, std::endl;
 using ivan::cat;
 
-[[noreturn]] void error(const auto&... args) {
+template <typename... T>
+[[noreturn]] void error(const T&... args) {
   throw std::runtime_error(cat(args...));
 }
 
@@ -87,13 +88,17 @@ auto guard(T x) {
   return wrapper(x);
 }
 
-template <typename event_t>
+template <
+  typename event_t,
+  typename H,
+  typename E
+>
 void read_via_buffer(
   const char* filename,
   char* buffer,
   size_t buffer_size,
-  auto&& header_f,
-  auto&& event_f
+  H&& header_f,
+  E&& event_f
 ) {
   constexpr size_t event_size = sizeof(event_t);
 

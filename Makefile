@@ -31,7 +31,7 @@ bin/%: .build/%.o
 
 .build/%.o: src/%.cc
 	@mkdir -pv $(dir $@)
-	$(CXX) -std=c++20 $(CFLAGS) $(DEPFLAGS) -c $(filter %.cc,$^) -o $@
+	$(CXX) -std=c++17 $(CFLAGS) $(DEPFLAGS) -c $(filter %.cc,$^) -o $@
 
 .build/%.o: src/%.c
 	@mkdir -pv $(dir $@)
