@@ -25,10 +25,10 @@ inline auto to_string_view(const T& x) noexcept {
   if constexpr (std::is_same_v<T,char>)
     return std::string_view(&x,1);
 #ifdef IVAN_NUMCONV_HH
-  else if constexpr (std::is_invocable_v<xtos,const T&>)
-    return xtos(x);
+  else if constexpr (std::is_constructible_v<xtos<T>,const T&>)
+    return xtos<T>(x);
 #endif
-  else if constexpr (std::is_convertible_v<const T&,std::string_view>)
+  else if constexpr (std::is_constructible_v<std::string_view,const T&>)
     return std::string_view(x);
   else
     return failed_string_view_conversion<T>{};
@@ -71,6 +71,20 @@ inline std::enable_if_t<
   std::string
 > cat(const T&... x) {
   return cat(static_cast<std::string_view>(impl::to_string_view(x))...);
+}
+
+inline bool starts_with(const char* a, const char* b) noexcept {
+  for (;;) {
+    const char c = *b;
+    if (!c) return true;
+    if (*a != c) return false;
+    ++a; ++b;
+  }
+}
+inline bool ends_with(const char* a, const char* b) noexcept {
+  ssize_t i = ssize_t(strlen(a)) - ssize_t(strlen(b));
+  if (i < 0) return false;
+  return !strcmp(a+i,b);
 }
 
 } // end namespace ivan

@@ -13,16 +13,11 @@
 // #include <sys/stat.h>
 // #include <sys/types.h>
 
-#include "strings.hh"
+#include "error.hh"
 #include "debug.hh"
 
 using std::cout, std::endl;
-using ivan::cat;
-
-template <typename... T>
-[[noreturn]] void error(const T&... args) {
-  throw std::runtime_error(cat(args...));
-}
+using ivan::cat, ivan::error;
 
 struct uniform_axis {
   const double min, max, width;
@@ -244,7 +239,7 @@ too_short:
       if (var_i == unsigned(-1)) return;
       const unsigned i = var_i * myy_axis.nbins + myy_i;
 
-      ++data_hist.at(i).n;
+      ++data_hist[i].n;
     }
   );
 
@@ -278,7 +273,7 @@ too_short:
       if (var_i == unsigned(-1)) return;
       const unsigned i = var_i; // * myy_axis.nbins + myy_i;
 
-      auto& bin = mc_hist.at(i);
+      auto& bin = mc_hist[i];
       bin.w += e.weight;
       bin.w2 += e.weight * e.weight;
 

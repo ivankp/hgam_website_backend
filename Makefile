@@ -6,6 +6,7 @@ CFLAGS := -Wall -O3 -flto
 # CFLAGS := -Wall -Og -g
 CFLAGS += -fmax-errors=3 -Iinclude
 # CFLAGS += -DNDEBUG
+CPPSTD := c++17
 
 # generate .d files during compilation
 DEPFLAGS = -MT $@ -MMD -MP -MF .build/$*.d
@@ -20,6 +21,17 @@ all: $(EXE)
 
 bin/binner: LDFLAGS += -static -static-libgcc -static-libstdc++
 
+ifneq (, $(shell which root-config))
+ROOT_CFLAGS  := $(shell root-config --cflags | sed 's/ -std=c++[^ ]\+ / /')
+ROOT_LDFLAGS := $(shell root-config --ldflags)
+ROOT_LDLIBS  := $(shell root-config --libs)
+
+.build/make_vars.o: CFLAGS += $(ROOT_CFLAGS)
+.build/make_vars.o: CPPSTD = c++20
+bin/make_vars: LDFLAGS += $(ROOT_LDFLAGS)
+bin/make_vars: LDLIBS  += $(ROOT_LDLIBS)
+endif
+
 .PRECIOUS: .build/%.o
 
 bin/%: .build/%.o
@@ -31,7 +43,7 @@ bin/%: .build/%.o
 
 .build/%.o: src/%.cc
 	@mkdir -pv $(dir $@)
-	$(CXX) -std=c++17 $(CFLAGS) $(DEPFLAGS) -c $(filter %.cc,$^) -o $@
+	$(CXX) -std=$(CPPSTD) $(CFLAGS) $(DEPFLAGS) -c $(filter %.cc,$^) -o $@
 
 .build/%.o: src/%.c
 	@mkdir -pv $(dir $@)
