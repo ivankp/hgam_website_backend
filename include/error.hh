@@ -6,14 +6,20 @@
 
 namespace ivan {
 
-[[noreturn]] void error(const char* str) {
+[[noreturn]]
+[[gnu::always_inline]]
+inline void error(const char* str) {
   throw std::runtime_error(str);
 }
-[[noreturn]] void error(const std::string& str) {
+[[noreturn]]
+[[gnu::always_inline]]
+inline void error(const std::string& str) {
   throw std::runtime_error(str);
 }
 template <typename... T>
-[[noreturn]] void error(const T&... args) {
+[[gnu::always_inline]]
+[[noreturn]]
+inline void error(const T&... args) {
   throw std::runtime_error(cat(args...));
 }
 

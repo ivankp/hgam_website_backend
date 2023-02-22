@@ -1,5 +1,6 @@
 #include <iostream>
 #include <filesystem>
+#include <optional>
 #include <cstdlib>
 #include <cerrno>
 
@@ -13,16 +14,14 @@
 #include <TKey.h>
 #include <TLorentzVector.h>
 
-#include "program_options.hh"
+#include "numconv.hh"
+#include "strings.hh"
 #include "timed_counter.hh"
 #include "branch_reader.hh"
 #include "debug.hh"
 
 using std::cout, std::cerr, std::endl;
 using ivan::cat, ivan::branch_reader;
-
-#define VAR_PREF "HGamEventInfoAuxDyn."
-#define VAR_PREF_TRUTH "HGamTruthEventInfoAuxDyn."
 
 #define ERROR(...) ivan::error(__FILE__ ":" STR(__LINE__) ": ",__VA_ARGS__)
 
@@ -31,13 +30,21 @@ constexpr float fnan = std::numeric_limits<float>::quiet_NaN();
 std::filesystem::path dir;
 bool is_mc = false;
 uint64_t nevents = 0;
-float lumi = 0;
+float lumi = 0, weight = 0;
+double mc_factor = 0;
 
 template <typename T> constexpr char type_byte = '\0';
 // https://docs.python.org/3/library/struct.html#format-characters
-template <> constexpr char type_byte<float> = 'f';
-template <> constexpr char type_byte<char > = 'c';
-template <> constexpr char type_byte<int  > = 'i';
+template <> constexpr char type_byte<float  > = 'f';
+template <> constexpr char type_byte<char   > = 'c';
+template <> constexpr char type_byte<int32_t> = 'i';
+template <> constexpr char type_byte<uint8_t> = 'B';
+
+template <typename To, typename From>
+To ceiling_cast(From x) noexcept {
+  static constexpr To max = std::numeric_limits<To>::max();
+  return x < max ? To(x) : max;
+}
 
 template <typename T>
 char* bufcpy(char* m, T x) noexcept {
@@ -67,11 +74,7 @@ public:
     m(buf)
   {
     static constexpr size_t skip = sizeof(lumi) + sizeof(nevents);
-    TEST(name)
-    TEST(name.size())
-    TEST(skip+2)
     const size_t nulls = 8-((name.size()+2+skip)%8);
-    TEST(nulls)
     const size_t bufneed = name.size()+nulls+2+skip;
     if (buflen < bufneed)
       ERROR('\"',path.native(),"\": buffer length ",buflen," , need ",bufneed);
@@ -131,94 +134,113 @@ public:
 };
 
 int main(int argc, char** argv) {
-  if (argc < 3) {
-    cout << "usage: " << argv[0] << " output_dir input.root ...\n";
+  if (argc < 4) {
+    cout << "usage: " << argv[0] << " lumi output_dir input.root ...\n";
     return 1;
   }
+  lumi = atof(argv[1]);
+  is_mc = lumi == 0;
 
   cout << "Input files:\n";
-  for (int i=2; i<argc; ++i) {
+  for (int i=3; i<argc; ++i) {
     cout << argv[i] << '\n';
   }
   cout << endl;
 
   // Open output files ==============================================
-  std::filesystem::create_directories(dir = argv[1]);
+  std::filesystem::create_directories(dir = argv[2]);
   cout << "Output files:\n";
 
-  output_file<Float_t> f_abs_Zepp("abs_Zepp");
-  output_file< Char_t> f_catXS_lepton("catXS_lepton");
-  output_file< Char_t> f_catXS_MET("catXS_MET");
-  output_file< Char_t> f_catXS_nbjet("catXS_nbjet");
-  output_file< Char_t> f_catXS_ttH("catXS_ttH");
-  output_file< Char_t> f_catXS_VBF("catXS_VBF");
-  // output_file<  Int_t> f_cutFlow("cutFlow");
-  output_file<Float_t> f_Dphi_j_j_30("Dphi_j_j_30");
-  output_file<Float_t> f_Dphi_j_j_30_signed("Dphi_j_j_30_signed");
-  output_file<Float_t> f_Dphi_yy_jj_30("Dphi_yy_jj_30");
-  output_file<Float_t> f_HT_30("HT_30");
-  // output_file< Char_t> f_isPassed("isPassed");
-  output_file<Float_t> f_m_jj_30("m_jj_30");
-  output_file<Float_t> f_m_yy("m_yy");
-  output_file<Float_t> f_m_yyj_30("m_yyj_30");
-  output_file<Float_t> f_maxTau_yyj_30("maxTau_yyj_30");
-  // output_file<Float_t> f_mu("mu");
-  output_file<  Int_t> f_N_j_30("N_j_30");
-  output_file<Float_t> f_pT_j1_30("pT_j1_30");
-  output_file<Float_t> f_pT_yy("pT_yy");
-  output_file<Float_t> f_pT_yy_JV_30("pT_yy_JV_30");
-  output_file<Float_t> f_pT_yy_JV_40("pT_yy_JV_40");
-  output_file<Float_t> f_pT_yy_JV_50("pT_yy_JV_50");
-  output_file<Float_t> f_pT_yy_JV_60("pT_yy_JV_60");
-  output_file<Float_t> f_pT_yyj_30("pT_yyj_30");
-  output_file<Float_t> f_pT_yyjj_30("pT_yyjj_30");
-  output_file<Float_t> f_rel_DpT_y_y("rel_DpT_y_y");
-  output_file<Float_t> f_rel_pT_y1("rel_pT_y1");
-  output_file<Float_t> f_rel_pT_y2("rel_pT_y2");
-  output_file<Float_t> f_rel_sumpT_y_y("rel_sumpT_y_y");
-  output_file<Float_t> f_sumTau_yyj_30("sumTau_yyj_30");
-  output_file<Float_t> f_yAbs_yy("yAbs_yy");
+  output_file<uint8_t> f_N_j_30("N_j_30");
+
+// https://en.wikipedia.org/wiki/X_Macro
+#define VARS \
+  VAR(Float_t,abs_Zepp) \
+  VAR( Char_t,catXS_lepton) \
+  VAR( Char_t,catXS_MET) \
+  VAR( Char_t,catXS_nbjet) \
+  VAR( Char_t,catXS_ttH) \
+  VAR( Char_t,catXS_VBF) \
+  VAR(Float_t,Dphi_j_j_30) \
+  VAR(Float_t,Dphi_j_j_30_signed) \
+  VAR(Float_t,Dphi_yy_jj_30) \
+  VAR(Float_t,HT_30) \
+  VAR(Float_t,m_jj_30) \
+  VAR(Float_t,m_yy) \
+  VAR(Float_t,m_yyj_30) \
+  VAR(Float_t,maxTau_yyj_30) \
+  VAR(Float_t,pT_j1_30) \
+  VAR(Float_t,pT_yy) \
+  VAR(Float_t,pT_yy_JV_30) \
+  VAR(Float_t,pT_yy_JV_40) \
+  VAR(Float_t,pT_yy_JV_50) \
+  VAR(Float_t,pT_yy_JV_60) \
+  VAR(Float_t,pT_yyj_30) \
+  VAR(Float_t,pT_yyjj_30) \
+  VAR(Float_t,rel_DpT_y_y) \
+  VAR(Float_t,rel_pT_y1) \
+  VAR(Float_t,rel_pT_y2) \
+  VAR(Float_t,rel_sumpT_y_y) \
+  VAR(Float_t,sumTau_yyj_30) \
+  VAR(Float_t,yAbs_yy)
+
+#define VAR(TYPE,NAME) \
+  output_file<TYPE> f_##NAME(#NAME);
+
+    VARS
+
+#undef VAR
 
   cout << endl;
 
-  for (int i=2; i<argc; ++i) { // loop over input files
+  for (int i=3; i<argc; ++i) { // loop over input files
     cout << argv[i] << endl;
     TFile file(argv[i]);
+
+    if (is_mc) { // MC
+      for (auto* key : *file.GetListOfKeys()) {
+        const char* name = key->GetName();
+        if (!ivan::starts_with(name,"CutFlow_") ||
+            !ivan::ends_with(name,"_noDalitz_weighted")) continue;
+        TH1 *h = static_cast<TH1*>(static_cast<TKey*>(key)->ReadObj());
+        cout << name << endl;
+        const double n_all = h->GetBinContent(3);
+        cout << h->GetXaxis()->GetBinLabel(3) << " = " << n_all << endl;
+        mc_factor = 1e3/n_all;
+        break;
+      }
+    } else { // Data
+      // lumi += get_lumi(file);
+    }
+
     TTreeReader reader("CollectionTree",&file);
 
-    branch_reader< Char_t> b_isPassed(reader, VAR_PREF "isPassed");
+#define VAR_PREF "HGamEventInfoAuxDyn."
+#define VAR_PREF_TRUTH "HGamTruthEventInfoAuxDyn."
 
-    branch_reader<Float_t> b_abs_Zepp(reader, VAR_PREF "abs_Zepp");
-    branch_reader< Char_t> b_catXS_lepton(reader, VAR_PREF "catXS_lepton");
-    branch_reader< Char_t> b_catXS_MET(reader, VAR_PREF "catXS_MET");
-    branch_reader< Char_t> b_catXS_nbjet(reader, VAR_PREF "catXS_nbjet");
-    branch_reader< Char_t> b_catXS_ttH(reader, VAR_PREF "catXS_ttH");
-    branch_reader< Char_t> b_catXS_VBF(reader, VAR_PREF "catXS_VBF");
-    // branch_reader<  Int_t> b_cutFlow(reader, VAR_PREF "cutFlow");
-    branch_reader<Float_t> b_Dphi_j_j_30(reader, VAR_PREF "Dphi_j_j_30");
-    branch_reader<Float_t> b_Dphi_j_j_30_signed(reader, VAR_PREF "Dphi_j_j_30_signed");
-    branch_reader<Float_t> b_Dphi_yy_jj_30(reader, VAR_PREF "Dphi_yy_jj_30");
-    branch_reader<Float_t> b_HT_30(reader, VAR_PREF "HT_30");
-    branch_reader<Float_t> b_m_jj_30(reader, VAR_PREF "m_jj_30");
-    branch_reader<Float_t> b_m_yy(reader, VAR_PREF "m_yy");
-    branch_reader<Float_t> b_m_yyj_30(reader, VAR_PREF "m_yyj_30");
-    branch_reader<Float_t> b_maxTau_yyj_30(reader, VAR_PREF "maxTau_yyj_30");
-    // branch_reader<Float_t> b_mu(reader, VAR_PREF "mu");
-    branch_reader<  Int_t> b_N_j_30(reader, VAR_PREF "N_j_30");
-    branch_reader<Float_t> b_pT_j1_30(reader, VAR_PREF "pT_j1_30");
-    branch_reader<Float_t> b_pT_yy(reader, VAR_PREF "pT_yy");
-    branch_reader<Float_t> b_pT_yy_JV_30(reader, VAR_PREF "pT_yy_JV_30");
-    branch_reader<Float_t> b_pT_yy_JV_40(reader, VAR_PREF "pT_yy_JV_40");
-    branch_reader<Float_t> b_pT_yy_JV_50(reader, VAR_PREF "pT_yy_JV_50");
-    branch_reader<Float_t> b_pT_yy_JV_60(reader, VAR_PREF "pT_yy_JV_60");
-    branch_reader<Float_t> b_pT_yyj_30(reader, VAR_PREF "pT_yyj_30");
-    branch_reader<Float_t> b_pT_yyjj_30(reader, VAR_PREF "pT_yyjj_30");
-    branch_reader<Float_t> b_rel_DpT_y_y(reader, VAR_PREF "rel_DpT_y_y");
-    branch_reader<Float_t> b_rel_pT_y1(reader, VAR_PREF "rel_pT_y1");
-    branch_reader<Float_t> b_rel_pT_y2(reader, VAR_PREF "rel_pT_y2");
-    branch_reader<Float_t> b_rel_sumpT_y_y(reader, VAR_PREF "rel_sumpT_y_y");
-    branch_reader<Float_t> b_sumTau_yyj_30(reader, VAR_PREF "sumTau_yyj_30");
-    branch_reader<Float_t> b_yAbs_yy(reader, VAR_PREF "yAbs_yy");
+    branch_reader<Char_t> b_isPassed(reader, VAR_PREF "isPassed");
+
+    std::optional<branch_reader< Char_t>> b_isFiducial;
+    std::optional<branch_reader<Float_t>> b_cs_br_fe;
+    std::optional<branch_reader<Float_t>> b_weight;
+
+    if (is_mc) {
+      b_isFiducial.emplace(reader, VAR_PREF_TRUTH "isFiducial");
+      b_cs_br_fe.emplace(reader, VAR_PREF "crossSectionBRfilterEff");
+      b_weight.emplace(reader, VAR_PREF "weight");
+    }
+
+#define VAR(TYPE,NAME) \
+  branch_reader<TYPE> b_##NAME(reader, VAR_PREF #NAME); \
+  std::optional<branch_reader<TYPE>> b_##NAME##_truth; \
+  if (is_mc) b_##NAME##_truth.emplace(reader, VAR_PREF_TRUTH #NAME);
+
+    VAR(Int_t,N_j_30)
+
+    VARS
+
+#undef VAR
+#undef VARS
 
     // LOOP over events =============================================
     for (
@@ -235,101 +257,87 @@ int main(int argc, char** argv) {
 
       ++nevents;
 
+      if (is_mc) {
+        weight = (**b_weight) * (**b_cs_br_fe) * mc_factor;
+      }
+
       f_m_yy.write(m_yy);
 
       // ============================================================
-
-      const Float_t abs_Zepp = *b_abs_Zepp;
-      f_abs_Zepp.write(abs_Zepp);
-
-      const Char_t catXS_lepton = *b_catXS_lepton;
-      f_catXS_lepton.write(catXS_lepton);
-
-      const Char_t catXS_MET = *b_catXS_MET;
-      f_catXS_MET.write(catXS_MET);
-
-      const Char_t catXS_nbjet = *b_catXS_nbjet;
-      f_catXS_nbjet.write(catXS_nbjet);
-
-      const Char_t catXS_ttH = *b_catXS_ttH;
-      f_catXS_ttH.write(catXS_ttH);
-
-      const Char_t catXS_VBF = *b_catXS_VBF;
-      f_catXS_VBF.write(catXS_VBF);
-
-      const Float_t HT_30 = *b_HT_30*1e-3;
-      f_HT_30.write(HT_30);
-
-      const Float_t pT_yy = *b_pT_yy*1e-3;
-      f_pT_yy.write(pT_yy);
-
-      const Float_t pT_yy_JV_30 = *b_pT_yy_JV_30*1e-3;
-      f_pT_yy_JV_30.write(pT_yy_JV_30);
-
-      const Float_t pT_yy_JV_40 = *b_pT_yy_JV_40*1e-3;
-      f_pT_yy_JV_40.write(pT_yy_JV_40);
-
-      const Float_t pT_yy_JV_50 = *b_pT_yy_JV_50*1e-3;
-      f_pT_yy_JV_50.write(pT_yy_JV_50);
-
-      const Float_t pT_yy_JV_60 = *b_pT_yy_JV_60*1e-3;
-      f_pT_yy_JV_60.write(pT_yy_JV_60);
-
-      const Float_t rel_DpT_y_y = *b_rel_DpT_y_y*1e-3;
-      f_rel_DpT_y_y.write(rel_DpT_y_y);
-
-      const Float_t rel_pT_y1 = *b_rel_pT_y1*1e-3;
-      f_rel_pT_y1.write(rel_pT_y1);
-
-      const Float_t rel_pT_y2 = *b_rel_pT_y2*1e-3;
-      f_rel_pT_y2.write(rel_pT_y2);
-
-      const Float_t rel_sumpT_y_y = *b_rel_sumpT_y_y*1e-3;
-      f_rel_sumpT_y_y.write(rel_sumpT_y_y);
-
-      const Float_t yAbs_yy = *b_yAbs_yy;
-      f_yAbs_yy.write(yAbs_yy);
-
-      const Int_t N_j_30 = *b_N_j_30;
+      const uint8_t N_j_30 = ceiling_cast<uint8_t>(*b_N_j_30);
       f_N_j_30.write(N_j_30);
+
+#define VAR(TYPE,NAME) \
+  const TYPE NAME = *b_##NAME; \
+  f_##NAME.write(NAME);
+
+#define VAR_1e3(NAME) \
+  const float NAME = *b_##NAME * 1e-3; \
+  f_##NAME.write(NAME);
+
+#define VARS \
+  VAR(Float_t,abs_Zepp) \
+  VAR( Char_t,catXS_lepton) \
+  VAR( Char_t,catXS_MET) \
+  VAR( Char_t,catXS_nbjet) \
+  VAR( Char_t,catXS_ttH) \
+  VAR( Char_t,catXS_VBF) \
+  VAR(Float_t,HT_30) \
+  VAR(Float_t,yAbs_yy) \
+  \
+  VAR_1e3(pT_yy) \
+  VAR_1e3(pT_yy_JV_30) \
+  VAR_1e3(pT_yy_JV_40) \
+  VAR_1e3(pT_yy_JV_50) \
+  VAR_1e3(pT_yy_JV_60) \
+  VAR_1e3(rel_DpT_y_y) \
+  VAR_1e3(rel_pT_y1) \
+  VAR_1e3(rel_pT_y2) \
+  VAR_1e3(rel_sumpT_y_y)
+
+      VARS
+
+#undef VARS
+
+#undef VAR
+#undef VAR_1e3
 
       // 1 jet ======================================================
       bool enough_jets = N_j_30 >= 1;
-#define J(...) \
-  enough_jets ? float(__VA_ARGS__) : fnan;
 
-      const Float_t pT_j1_30 = J(*b_pT_j1_30*1e-3);
-      f_pT_j1_30.write(pT_j1_30);
+#define VAR(NAME) \
+  const float NAME = enough_jets ? float(*b_##NAME) : fnan; \
+  f_##NAME.write(NAME);
 
-      const Float_t pT_yyj_30 = J(*b_pT_yyj_30*1e-3);
-      f_pT_yyj_30.write(pT_yyj_30);
+#define VAR_1e3(NAME) \
+  const float NAME = enough_jets ? float(*b_##NAME * 1e-3) : fnan; \
+  f_##NAME.write(NAME);
 
-      const Float_t m_yyj_30 = J(*b_m_yyj_30*1e-3);
-      f_m_yyj_30.write(m_yyj_30);
+#define VARS \
+  VAR(pT_j1_30) \
+  VAR(pT_yyj_30) \
+  VAR(m_yyj_30) \
+  VAR(maxTau_yyj_30) \
+  VAR(sumTau_yyj_30)
 
-      const Float_t maxTau_yyj_30 = J(*b_maxTau_yyj_30);
-      f_maxTau_yyj_30.write(maxTau_yyj_30);
+      VARS
 
-      const Float_t sumTau_yyj_30 = J(*b_sumTau_yyj_30);
-      f_sumTau_yyj_30.write(sumTau_yyj_30);
+#undef VARS
 
       // 2 jets =====================================================
       enough_jets = N_j_30 >= 2;
 
-      const Float_t pT_yyjj_30 = J(*b_pT_yyjj_30*1e-3);
-      f_pT_yyjj_30.write(pT_yyjj_30);
+#define VARS \
+  VAR(Dphi_j_j_30) \
+  VAR(Dphi_j_j_30_signed) \
+  VAR(Dphi_yy_jj_30) \
+  \
+  VAR_1e3(pT_yyjj_30) \
+  VAR_1e3(m_jj_30)
 
-      const Float_t m_jj_30 = J(*b_m_jj_30*1e-3);
-      f_m_jj_30.write(m_jj_30);
+      VARS
 
-      const Float_t Dphi_j_j_30 = J(*b_Dphi_j_j_30);
-      f_Dphi_j_j_30.write(Dphi_j_j_30);
-
-      const Float_t Dphi_j_j_30_signed = J(*b_Dphi_j_j_30_signed);
-      f_Dphi_j_j_30_signed.write(Dphi_j_j_30_signed);
-
-      const Float_t Dphi_yy_jj_30 = J(*b_Dphi_yy_jj_30);
-      f_Dphi_yy_jj_30.write(Dphi_yy_jj_30);
+#undef VARS
     }
   }
 }
