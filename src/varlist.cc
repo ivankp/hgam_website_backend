@@ -13,6 +13,9 @@ using std::cout, std::cerr, std::endl;
 
 #define ERROR(...) ivan::error(__FILE__ ":" STR(__LINE__) ": ",__VA_ARGS__)
 
+const char* const var_pref = "HGamEventInfoAuxDyn.";
+const size_t var_pref_len = strlen(var_pref);
+
 int main(int argc, char** argv) {
   if (argc != 2) {
     cout << "usage: " << argv[0] << " mxaod.root\n";
@@ -26,14 +29,14 @@ int main(int argc, char** argv) {
 
   for (auto* _branch : *tree->GetListOfBranches()) {
     TBranch* branch = dynamic_cast<TBranch*>(_branch);
-    const char* name = strchr(branch->GetName(),'.');
+    const char* name = branch->GetName();
 
-    if (name && name[1]) {
+    if (name && !strncmp(var_pref, name, var_pref_len)) {
       TLeaf* leaf = static_cast<TLeaf*>(branch->GetListOfLeaves()->First());
       const char* type = leaf->GetTypeName();
 
       if (type)
-        branches.push_back({ name+1, type });
+        branches.push_back({ name+var_pref_len, type });
     }
   }
 
@@ -55,22 +58,28 @@ int main(int argc, char** argv) {
     if (ntype < type.size()) ntype = type.size();
   }
 
-  cout << '\n';
-  for (const auto& [name,type] : branches) {
-    cout << "output_file<" << std::setw(ntype) << type << ">"
-      " f_" << name << "(\"" << name << "\");\n";
-  }
+  // cout << '\n';
+  // for (const auto& [name,type] : branches) {
+  //   cout << "output_file<" << std::setw(ntype) << type << ">"
+  //     " f_" << name << "(\"" << name << "\");\n";
+  // }
+
+  // cout << '\n';
+  // for (const auto& [name,type] : branches) {
+  //   cout << "branch_reader<" << std::setw(ntype) << type << ">"
+  //     " b_" << name << "(reader, VAR_PREF \"" << name << "\");\n";
+  // }
+
+  // cout << '\n';
+  // for (const auto& [name,type] : branches) {
+  //   cout << "const " << type << ' ' << name << " = *b_" << name;
+  //   cout << ";\n"
+  //     "f_" << name << ".write(" << name << ");\n\n";
+  // }
 
   cout << '\n';
   for (const auto& [name,type] : branches) {
-    cout << "branch_reader<" << std::setw(ntype) << type << ">"
-      " b_" << name << "(reader, VAR_PREF \"" << name << "\");\n";
-  }
-
-  cout << '\n';
-  for (const auto& [name,type] : branches) {
-    cout << "const " << type << ' ' << name << " = *b_" << name;
-    cout << ";\n"
-      "f_" << name << ".write(" << name << ");\n\n";
+    cout << "VAR(" << std::setw(ntype) << type << ","
+      << name << ") \\\n";
   }
 }

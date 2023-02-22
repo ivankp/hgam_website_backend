@@ -36,10 +36,10 @@ bin/make_vars: LDLIBS  += $(ROOT_LDLIBS)
 bin/convert_mxaods: LDFLAGS += $(ROOT_LDFLAGS)
 bin/convert_mxaods: LDLIBS  += $(ROOT_LDLIBS)
 
-.build/codegen.o: CPPSTD = c++20
-.build/codegen.o: CFLAGS += $(ROOT_CFLAGS)
-bin/codegen: LDFLAGS += $(ROOT_LDFLAGS)
-bin/codegen: LDLIBS  += $(ROOT_LDLIBS)
+.build/varlist.o: CPPSTD = c++20
+.build/varlist.o: CFLAGS += $(ROOT_CFLAGS)
+bin/varlist: LDFLAGS += $(ROOT_LDFLAGS)
+bin/varlist: LDLIBS  += $(ROOT_LDLIBS)
 endif
 
 .PRECIOUS: .build/%.o
