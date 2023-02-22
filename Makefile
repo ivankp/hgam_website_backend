@@ -26,10 +26,20 @@ ROOT_CFLAGS  := $(shell root-config --cflags | sed 's/ -std=c++[^ ]\+ / /')
 ROOT_LDFLAGS := $(shell root-config --ldflags)
 ROOT_LDLIBS  := $(shell root-config --libs)
 
-.build/make_vars.o: CFLAGS += $(ROOT_CFLAGS)
 .build/make_vars.o: CPPSTD = c++20
+.build/make_vars.o: CFLAGS += $(ROOT_CFLAGS)
 bin/make_vars: LDFLAGS += $(ROOT_LDFLAGS)
 bin/make_vars: LDLIBS  += $(ROOT_LDLIBS)
+
+.build/convert_mxaods.o: CPPSTD = c++20
+.build/convert_mxaods.o: CFLAGS += $(ROOT_CFLAGS)
+bin/convert_mxaods: LDFLAGS += $(ROOT_LDFLAGS)
+bin/convert_mxaods: LDLIBS  += $(ROOT_LDLIBS)
+
+.build/codegen.o: CPPSTD = c++20
+.build/codegen.o: CFLAGS += $(ROOT_CFLAGS)
+bin/codegen: LDFLAGS += $(ROOT_LDFLAGS)
+bin/codegen: LDLIBS  += $(ROOT_LDLIBS)
 endif
 
 .PRECIOUS: .build/%.o
