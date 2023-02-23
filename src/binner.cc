@@ -1,29 +1,27 @@
-#include <cstdlib>
-#include <cstring>
-#include <cmath>
-
 #include <iostream>
 #include <iomanip>
 #include <algorithm>
 #include <chrono>
 #include <vector>
 
+#include <cstdlib>
+#include <cstring>
+#include <cmath>
+
 #include <unistd.h>
 #include <fcntl.h>
-// #include <sys/stat.h>
-// #include <sys/types.h>
 
 #include "error.hh"
-#include "debug.hh"
+// #include "debug.hh"
 
-using std::cout, std::endl;
+using std::cout;
 using ivan::cat, ivan::error;
 
 struct uniform_axis {
-  const double min, max, width;
-  const unsigned nbins;
+  double min, max, width;
+  unsigned nbins;
 
-  uniform_axis(unsigned nbins, double min, double max)
+  uniform_axis(unsigned nbins, double min, double max) noexcept
   : min(min), max(max), width((max-min)/nbins), nbins(nbins) { }
 
   unsigned index(double x) const noexcept {
@@ -38,10 +36,10 @@ struct uniform_axis {
 };
 
 struct nonuniform_axis {
-  const double* const edges;
-  const unsigned nbins;
+  const double* edges;
+  unsigned nbins;
 
-  nonuniform_axis(unsigned nbins, const double* edges)
+  nonuniform_axis(unsigned nbins, const double* edges) noexcept
   : edges(edges), nbins(nbins) { }
 
   unsigned index(double x) const noexcept {
@@ -96,8 +94,9 @@ void read_via_buffer(
   E&& event_f
 ) {
   constexpr size_t event_size = sizeof(event_t);
+  // static_assert(event_size <= buffer_size);
 
-  auto fd = guard<close>( ::open(filename,O_RDONLY) );
+  auto fd = guard<::close>( ::open(filename,O_RDONLY) );
   if (fd < 0) error("failed to open file ",filename);
 
   bool header = true;
@@ -130,16 +129,31 @@ void read_via_buffer(
   }
 }
 
+unsigned is_var(const char* s) {
+  if (!s) return 0;
+  if (*s != 'x') return 0;
+  const char c = *++s;
+  if (c < '1' || '9' < c) return 0;
+  if (*++s != '\0') return 0;
+  return c - '0';
+}
+
 int main(int argc, char** argv) { try {
   using clock = std::chrono::system_clock;
   using time  = std::chrono::time_point<clock>;
   const time start = clock::now();
 
+  std::ios_base::sync_with_stdio(false);
+
   if (argc!=2) error("missing argument");
 
   float lumi = 0;
-  std::string_view var;
-  std::vector<double> edges;
+  struct var_t: nonuniform_axis {
+    std::string_view name;
+    var_t(): nonuniform_axis(0,nullptr) { }
+    ~var_t() { if (edges) free(const_cast<double*>(edges)); }
+  };
+  std::vector<var_t> vars; vars.reserve(9);
   uint64_t n_events_data = 0, n_events_mc = 0;
   double signal_region[2] { 121, 129 };
 
@@ -154,28 +168,43 @@ int main(int argc, char** argv) { try {
       if (c && c!=b) {
         lumi = atof(c);
       }
-    } else if (!strcmp(a,"var")) {
+    } else if (const unsigned xi = is_var(a)) {
       if (c && c!=b) {
-        var = c;
-      }
-    } else if (!strcmp(a,"edges")) {
-      if (c && c!=b) {
-        unsigned max_nedges = 0;
+        if (vars.size() < xi) vars.resize(xi);
+        auto& var = vars[xi-1];
+
+        int i = 0;
         for (char *b=c;; ++b) { // find number of edges
           char k = *b;
           if (!k) break;
-          if (k=='+') ++max_nedges;
+          if (k=='+') ++i;
         }
-        edges.reserve(++max_nedges);
+        double* edges = static_cast<double*>(malloc(i*sizeof(double)));
+        i = -1;
         for (char *a=c, *b=a;; ++b) { // parse edges
           char k = *b;
           if (!k || k=='+') {
             *b = '\0';
-            if (b!=a) edges.push_back(atof(a));
+            if (b!=a) {
+              if (i < 0) var.name = a;
+              else edges[i] = atof(a);
+              ++i;
+            }
             a = b+1;
             if (!k) break;
           }
         }
+
+        if (i < 0) error("missing variable name");
+        if (i < 1) error("missing edges for ",var.name);
+
+        std::sort( edges, edges+i );
+        i = std::unique( edges, edges+i ) - edges;
+
+        if (i < 2) error("fewer than 2 edges for ",var.name);
+
+        var.edges = edges;
+        var.nbins = i-1;
       }
     }
 
@@ -183,33 +212,36 @@ int main(int argc, char** argv) { try {
     a = b+1;
   }
 
-  // validate input =================================================
-  if (var.empty()) error("missing var");
-  if (edges.empty()) error("missing edges");
-  if (edges.size() < 2) error("fewer than 2 edges");
-
-  std::sort(edges.begin(),edges.end());
-  edges.erase( std::unique(edges.begin(),edges.end()), edges.end() );
-
   // binning ========================================================
-  nonuniform_axis var_axis(edges.size()-1,edges.data());
-  uniform_axis    myy_axis(55,105,160);
+  const uniform_axis myy_axis(55,105,160);
 
   struct data_bin { unsigned long n=0; };
   struct   mc_bin { double w=0, w2=0; };
 
-  const unsigned nbins = var_axis.nbins * myy_axis.nbins;
-  std::vector<data_bin> data_hist(nbins);
-  std::vector<  mc_bin>   mc_hist(var_axis.nbins);
+  unsigned n_data_bins = myy_axis.nbins;
+  unsigned n_mc_bins = 1;
+  for (const auto& var : vars) {
+    n_data_bins *= var.nbins;
+    n_mc_bins *= var.nbins;
+  }
+  std::vector<data_bin> data_hist(n_data_bins);
+  std::vector<  mc_bin>   mc_hist(n_mc_bins);
 
   std::vector<char> buffer(1 << 15);
 
 #define READ(X) \
   memcpy(&X,m,sizeof(X)); m += sizeof(X);
 
-  struct data_event_t { float myy, var; };
-  read_via_buffer<data_event_t>(
-    cat("data/",var,"_data.dat").c_str(),
+  // TODO: read multiple files in parallel
+
+  read_via_buffer(
+    [&]{
+      std::vector<std::string> files;
+      files.reserve(vars.size());
+      for (const auto& var : vars)
+        files.emplace_back(cat("data/",var.name,"_data.dat"));
+      return files;
+    }(),
     buffer.data(), buffer.size(),
     [&](char* m, char* end){ // read header
       if ((end-m) < (ssize_t)var.size()) goto too_short;
@@ -229,22 +261,28 @@ int main(int argc, char** argv) { try {
 too_short:
       error("file header is too short");
     },
-    [&](data_event_t& e){ // read event
-      if (signal_region[0] <= e.myy && e.myy <= signal_region[1]) return;
+    [&](double m_yy, double* x){ // read event
+      if (signal_region[0] <= m_yy && m_yy <= signal_region[1]) return;
       // TODO: don't use empty bins
 
-      const unsigned myy_i = myy_axis.index(e.myy);
-      if (myy_i == unsigned(-1)) return;
-      const unsigned var_i = var_axis.index(e.var);
-      if (var_i == unsigned(-1)) return;
-      const unsigned i = var_i * myy_axis.nbins + myy_i;
+      unsigned B = 0;
+      for (unsigned i=vars.size(); i; ) {
+        const auto& var = vars[--i];
+        const unsigned b = var.index(x[i]);
+        if (b == unsigned(-1)) return;
+        B = B * var.nbins + b;
+      }
+      { const unsigned b = myy_axis.index(m_yy);
+        if (b == unsigned(-1)) return;
+        B = B * myy_axis.nbins + b;
+      }
 
-      ++data_hist[i].n;
+      ++data_hist[B].n;
     }
   );
 
-  struct mc_event_t { float myy, var, truth, weight; };
-  read_via_buffer<mc_event_t>(
+  // struct mc_event_t { float m_yy, var, truth, weight; };
+  read_via_buffer/*<mc_event_t>*/(
     cat("data/",var,"_mc.dat").c_str(),
     // "data/pT_yy_mc.dat",
     buffer.data(), buffer.size(),
@@ -264,16 +302,18 @@ too_short:
 too_short:
       error("file header is too short");
     },
-    [&](mc_event_t& e){ // read event
-      if (!(signal_region[0] <= e.myy && e.myy <= signal_region[1])) return;
+    [&](double m_yy, double* x){ // read event
+      if (!(signal_region[0] <= m_yy && m_yy <= signal_region[1])) return;
 
-      // const unsigned myy_i = myy_axis.index(e.myy);
-      // if (myy_i == unsigned(-1)) return;
-      const unsigned var_i = var_axis.index(e.var);
-      if (var_i == unsigned(-1)) return;
-      const unsigned i = var_i; // * myy_axis.nbins + myy_i;
+      unsigned B = 0;
+      for (unsigned i=vars.size(); i; ) {
+        const auto& var = vars[--i];
+        const unsigned b = var.index(x[i]);
+        if (b == unsigned(-1)) return;
+        B = B * var.nbins + b;
+      }
 
-      auto& bin = mc_hist[i];
+      auto& bin = mc_hist[B];
       bin.w += e.weight;
       bin.w2 += e.weight * e.weight;
 
@@ -283,28 +323,34 @@ too_short:
 
   // JSON response ==================================================
   cout << "{"
-    "\"n_events_data\":" << n_events_data << ","
-    "\"n_events_mc\":" << n_events_mc << ","
     "\"lumi\":" << lumi << ","
-    "\"var\":\"" << var << "\","
+    "\"data_events\":" << n_events_data << ","
+    "\"mc_events\":" << n_events_mc << ","
     "\"signal_region\":[" << signal_region[0] <<','<< signal_region[1] << "],"
-    "\"var_bins\":[";
-
-  for (unsigned i=0, n=edges.size(); i<n; ++i) {
-    if (i) cout << ',';
-    const auto x = edges[i];
-    if (std::isinf(x)) cout << (x < 0 ? "\"-inf\"" : "\"inf\"");
-    else cout << x;
-  }
-
-  cout << "],"
-    "\"myy_bins\":["
+    "\"m_yy\":["
       << myy_axis.nbins << ','
       << myy_axis.min << ','
       << myy_axis.max << "],"
+    "\"vars\":[";
+
+  bool first_var = true;
+  for (const auto& var : vars) {
+    if (first_var) first_var = false;
+    else cout << ',';
+    cout << "[\"" << var.name << "\",[";
+    for (unsigned i=0, n=var.nbins+1; i<n; ++i) {
+      if (i) cout << ',';
+      const auto x = var.edges[i];
+      if (std::isinf(x)) cout << (x < 0 ? "\"-inf\"" : "\"inf\"");
+      else cout << x;
+    }
+    cout << "]]";
+  }
+
+  cout << "],"
     "\"sig\":[";
 
-  for (unsigned i=0, n=var_axis.nbins; i<n; ++i) {
+  for (unsigned i=0; i<n_mc_bins; ++i) {
     if (i) cout << ',';
     cout << mc_hist[i].w * lumi;
   }
@@ -312,7 +358,7 @@ too_short:
   cout << "],"
     "\"sig_sys\":[";
 
-  for (unsigned i=0, n=var_axis.nbins; i<n; ++i) {
+  for (unsigned i=0; i<n_mc_bins; ++i) {
     if (i) cout << ',';
     cout << std::sqrt(mc_hist[i].w2) * lumi;
   }

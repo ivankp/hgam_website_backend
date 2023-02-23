@@ -31,7 +31,7 @@ constexpr float fnan = std::numeric_limits<float>::quiet_NaN();
 std::filesystem::path dir;
 bool mc = false;
 uint64_t nevents = 0;
-float lumi = 0, weight = 0;
+float lumi = 0;
 double mc_factor = 0;
 
 template <typename T> constexpr char type_byte = '\0';
@@ -274,10 +274,9 @@ int main(int argc, char** argv) { try {
 
       f_m_yy.write(m_yy);
 
-      if (mc) {
-        weight = double(**b_weight) * double(**b_cs_br_fe) * mc_factor;
-        f_m_yy.write(weight);
-      }
+      if (mc) f_m_yy.write<float>( // weight
+        double(**b_weight) * double(**b_cs_br_fe) * mc_factor
+      );
 
       // ============================================================
       const uint8_t N_j_30 = ceiling_cast<uint8_t>(*b_N_j_30);
