@@ -7,12 +7,20 @@
 
 namespace ivan {
 
+#if __cplusplus < 202002L
+template <typename T, typename=void>
+#else
 template <typename T>
+#endif
 struct xtos { };
 
 template <typename T>
+#if __cplusplus < 202002L
+struct xtos<T,std::enable_if_t<std::is_arithmetic_v<T>>> {
+#else
 requires std::is_arithmetic_v<T>
 struct xtos<T> {
+#endif
   unsigned char n;
   char s[
     std::is_integral_v<T>
@@ -43,8 +51,12 @@ xtos(T x) -> xtos<T>;
 namespace ivan {
 
 template <typename T>
-requires std::is_arithmetic_v<T>
-T stox(std::string_view s) {
+#if __cplusplus < 202002L
+std::enable_if_t<std::is_arithmetic_v<T>,T>
+#else
+requires std::is_arithmetic_v<T> T
+#endif
+stox(std::string_view s) {
   T x;
   const char* end = s.data() + s.size();
   const auto [p,e] = std::from_chars(s.data(),end,x);

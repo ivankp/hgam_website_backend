@@ -11,6 +11,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 
+#include "numconv.hh"
 #include "error.hh"
 #include "debug.hh"
 
@@ -69,20 +70,6 @@ struct nonuniform_axis {
   }
 };
 
-// template <auto f, typename T>
-// auto guard(T x) {
-//   class wrapper {
-//     T x;
-//   public:
-//     wrapper(T x): x(x) { }
-//     ~wrapper() { f(x); }
-//     operator T() const noexcept { return x; }
-//     T operator+() const noexcept { return x; }
-//     auto&& operator=(T o) noexcept { return x = o; }
-//   };
-//   return wrapper(x);
-// }
-
 unsigned is_var(const char* s) {
   if (!s) return 0;
   if (*s != 'x') return 0;
@@ -108,7 +95,7 @@ struct Var: nonuniform_axis {
 unsigned nvars = 0;
 
 double lumi = 0;
-uint64_t n_events_data = 0, n_events_mc = 0;
+uint64_t nevents_data = 0, nevents_mc = 0;
 double signal_region[2] { 121, 129 };
 
 template <bool mc, typename F>
@@ -124,16 +111,18 @@ void read_events(F&& event_f) {
       if (fd >= 0) ::close(fd);
       if (buf) ::free(buf);
     }
-  } files[maxnvars];
+  } files[maxnvars+1];
 
   // open files and read headers
-  for (unsigned v=0; v<nvars; ++v) {
-    auto& var = vars[v];
+  for (unsigned v=0; v<=nvars; ++v) {
+    const auto var_name = v
+      ? std::string_view(vars[v-1].name)
+      : std::string_view("m_yy");
     auto& f = files[v];
 
     // open file for reading
     f.fd = ::open((f.path = cat(
-      "data/", var.name, mc ? "_mc.dat" : "_data.dat"
+      "data/", var_name, mc ? "_mc.dat" : "_data.dat"
     )).c_str(), O_RDONLY);
     if (f.fd < 0) error("failed to open ",f.path);
 
@@ -149,7 +138,7 @@ void read_events(F&& event_f) {
       : sizeof(_lumi) + sizeof(_nevents)
     );
     const size_t header_len = round_down(
-      var.name.size()+8 + header_tail_len, 8
+      var_name.size()+8 + header_tail_len, 8
     );
     if (sizeof(buf) < header_len)
       error("insufficient header buffer size for ",f.path);
@@ -160,7 +149,7 @@ void read_events(F&& event_f) {
       error("failed to read whole header in ",f.path);
 
     // check that variable name is as expected
-    if (var.name != m) error(f.path," does not start with ",var.name);
+    if (var_name != m) error(f.path," does not start with ",var_name);
 
     // next byte should be d or m
     m += (header_len-header_tail_len);
@@ -176,18 +165,18 @@ void read_events(F&& event_f) {
     if (v) {
       if (!mc) {
         if (_lumi != lumi) error("different lumi in ",f.path);
-        if (_nevents != n_events_data)
+        if (_nevents != nevents_data)
           error("different number of events in ",f.path);
       } else {
-        if (_nevents != n_events_mc)
+        if (_nevents != nevents_mc)
           error("different number of events in ",f.path);
       }
     } else {
       if (!mc) {
         lumi = _lumi;
-        n_events_data = _nevents;
+        nevents_data = _nevents;
       } else {
-        n_events_mc = _nevents;
+        nevents_mc = _nevents;
       }
     }
 
@@ -204,22 +193,24 @@ void read_events(F&& event_f) {
     f.buf = static_cast<char*>(malloc(f.buflen));
   }
 
+  uint64_t nevents_total = 0;
   double event[sizeof(double)*2*maxnvars];
   for (;;) { // read data file in chunks of buffer size
     unsigned nevents = -1;
-    for (unsigned v=0; v<nvars; ++v) {
+    for (unsigned v=0; v<=nvars; ++v) {
       auto& f = files[v];
       const ssize_t nread = ::read(f.fd,f.buf+f.nbuf,f.buflen-f.nbuf);
       if (nread < 0) error("failed to read ",f.path);
       f.nbuf += nread;
-      const unsigned read_events = f.nbuf / f.event_size;
-      if (read_events < nevents) nevents = read_events;
+      const unsigned nevents_batch = f.nbuf / f.event_size;
+      if (nevents_batch < nevents) nevents = nevents_batch;
     } // for files
     if (nevents==0) break;
+    nevents_total += nevents;
     for (unsigned e=0; e<nevents; ++e) { // loop over events
       double* x = event;
       // combine events from multiple files
-      for (unsigned v=0; v<nvars; ++v) {
+      for (unsigned v=0; v<=nvars; ++v) {
         auto& f = files[v];
         const char* m = f.buf + f.event_size*e;
 
@@ -241,7 +232,7 @@ void read_events(F&& event_f) {
           }
         }
       } // for files
-      // event_f(event); // call event processing function
+      event_f(event); // call event processing function
     } // for events
     for (unsigned v=0; v<nvars; ++v) {
       auto& f = files[v];
@@ -250,6 +241,10 @@ void read_events(F&& event_f) {
         memmove(f.buf,f.buf+processed,f.nbuf);
     }
   } // for ;;
+  if (nevents_total != (mc ? nevents_mc : nevents_data)) error(
+    (mc?"mc":"data")," contains ",(mc ? nevents_mc : nevents_data)," events"
+    ", but ",nevents_total," were read"
+  );
 }
 
 int main(int argc, char** argv) {
@@ -332,9 +327,10 @@ try {
 
   unsigned n_data_bins = myy_axis.nbins;
   unsigned n_mc_bins = 1;
-  for (const auto& var : vars) {
-    n_data_bins *= var.nbins;
-    n_mc_bins *= var.nbins;
+  for (unsigned v=nvars; v; ) {
+    const auto nbins = vars[--v].nbins;
+    n_data_bins *= nbins;
+    n_mc_bins *= nbins;
   }
   std::vector<data_bin> data_hist(n_data_bins);
   std::vector<  mc_bin>   mc_hist(n_mc_bins);
@@ -346,11 +342,15 @@ try {
       // TODO: don't use empty bins
 
       unsigned B = 0;
-      for (unsigned v=nvars; v; ) {
-        const auto& var = vars[--v];
-        const unsigned b = v ? var.index(x[v]) : myy_axis.index(m_yy);
+      { for (unsigned v=nvars; v; ) {
+          const auto& var = vars[--v];
+          const unsigned b = var.index(x[v]);
+          if (b == unsigned(-1)) return;
+          B = B * var.nbins + b;
+        }
+        const unsigned b = myy_axis.index(m_yy);
         if (b == unsigned(-1)) return;
-        B = B * var.nbins + b;
+        B = B * myy_axis.nbins + b;
       }
 
       ++data_hist[B].n;
@@ -361,7 +361,6 @@ try {
     [&](double* x){ // read event
       const double m_yy = x[0];
       if (!(signal_region[0] <= m_yy && m_yy <= signal_region[1])) return;
-      const double weight = x[1];
 
       unsigned B = 0;
       for (unsigned v=nvars; v; ) {
@@ -372,18 +371,21 @@ try {
       }
 
       auto& bin = mc_hist[B];
+      const double weight = x[1];
       bin.w += weight;
       bin.w2 += weight * weight;
 
       // TODO: migration (compare truth & reco)
+      TEST(m_yy)
+      TEST(weight)
     }
   );
 
   // JSON response ==================================================
   cout << "{"
     "\"lumi\":" << lumi << ","
-    "\"data_events\":" << n_events_data << ","
-    "\"mc_events\":" << n_events_mc << ","
+    "\"nevents_data\":" << nevents_data << ","
+    "\"nevents_mc\":" << nevents_mc << ","
     "\"signal_region\":[" << signal_region[0] <<','<< signal_region[1] << "],"
     "\"m_yy\":["
       << myy_axis.nbins << ','
