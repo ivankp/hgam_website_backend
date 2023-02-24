@@ -12,7 +12,7 @@
 #include <fcntl.h>
 
 #include "error.hh"
-// #include "debug.hh"
+#include "debug.hh"
 
 using std::cout;
 using ivan::cat, ivan::error;
@@ -130,11 +130,19 @@ void read_events(F&& event_f) {
     )).c_str(), O_RDONLY);
     if (f.fd < 0) error("failed to open ",f.path);
 
+    TEST(f.path)
+
     // read headers -----------------------------------------------
     char buf[128]; // assume this is enough for any header
     const char* m = buf;
 
-    const size_t header_tail_len = 2 + sizeof(lumi) + sizeof(n_events_data);
+    float _lumi;
+    uint64_t _nevents;
+
+    const size_t header_tail_len = 2 + (mc
+      ? sizeof(_nevents)
+      : sizeof(_lumi) + sizeof(_nevents)
+    );
     const size_t header_len = round_down(
       var.name.size()+8 + header_tail_len, 8
     );
@@ -157,9 +165,6 @@ void read_events(F&& event_f) {
     ++m;
 
     // read constants
-    float _lumi;
-    uint64_t _nevents;
-
     if (!mc) { memcpy(&_lumi,m,sizeof(_lumi)); m += sizeof(_lumi); }
     memcpy(&_nevents,m,sizeof(_nevents));
 
@@ -202,8 +207,8 @@ void read_events(F&& event_f) {
       const ssize_t nread = ::read(f.fd,f.buf+f.nbuf,f.buflen-f.nbuf);
       if (nread < 0) error("failed to read ",f.path);
       f.nbuf += nread;
-      const unsigned _nevents = f.nbuf / f.event_size;
-      if (_nevents < nevents) nevents = _nevents;
+      const unsigned read_events = f.nbuf / f.event_size;
+      if (read_events < nevents) nevents = read_events;
     } // for files
     if (nevents==0) break;
     for (unsigned e=0; e<nevents; ++e) { // loop over events
@@ -215,27 +220,23 @@ void read_events(F&& event_f) {
 
         for (unsigned n=(mc?2:1); n--; ++x) {
           switch (f.type) {
-            case 'f':
-              *x = *reinterpret_cast<const float*>(m);
-              m += sizeof(float);
+#define CASE(t,type) \
+            case t: \
+              *x = *reinterpret_cast<const type*>(m); \
+              m += sizeof(type); \
               break;
-            case 'i':
-              *x = *reinterpret_cast<const int32_t*>(m);
-              m += sizeof(int32_t);
-              break;
-            case 'B':
-              *x = *reinterpret_cast<const uint8_t*>(m);
-              m += sizeof(uint8_t);
-              break;
-            case 'c':
-              *x = *reinterpret_cast<const char*>(m);
-              m += sizeof(char);
-              break;
+
+            CASE('f',float)
+            CASE('i',int32_t)
+            CASE('B',uint8_t)
+            CASE('c',char)
             default: ;
+
+#undef CASE
           }
         }
       } // for files
-      event_f(event); // call event processing function
+      // event_f(event); // call event processing function
     } // for events
     for (unsigned i=0; i<nvars; ++i) {
       auto& f = files[i];
@@ -315,6 +316,9 @@ try {
   nvars = std::remove_if(vars,vars+maxnvars,[](const auto& var){
     return var.name.empty();
   }) - vars;
+
+  if (nvars==0) error("no variables specified");
+  TEST(nvars)
 
   // binning ========================================================
   const uniform_axis myy_axis(55,105,160);

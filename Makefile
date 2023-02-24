@@ -3,7 +3,7 @@
 ifeq (0, $(words $(findstring $(MAKECMDGOALS), clean))) #############
 
 # CFLAGS := -Wall -O3 -flto
-CFLAGS := -Wall -Og -g
+CFLAGS := -Wall -O0 -g
 CFLAGS += -fmax-errors=3 -Iinclude
 # CFLAGS += -DNDEBUG
 CPPSTD := c++17
