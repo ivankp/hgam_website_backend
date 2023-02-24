@@ -96,7 +96,14 @@ constexpr unsigned maxnvars = 9;
 struct Var: nonuniform_axis {
   std::string_view name;
   Var(): nonuniform_axis(0,nullptr) { }
-  ~Var() { if (edges) free((void*)edges); }
+  Var& operator=(Var& o) = delete;
+  Var& operator=(Var&& o) noexcept {
+    nbins = o.nbins;
+    edges = o.edges; o.edges = nullptr;
+    name = o.name;
+    return *this;
+  }
+  ~Var() { if (edges) { free((void*)edges); } }
 } vars[maxnvars];
 unsigned nvars = 0;
 
@@ -120,17 +127,15 @@ void read_events(F&& event_f) {
   } files[maxnvars];
 
   // open files and read headers
-  for (unsigned i=0; i<nvars; ++i) {
-    auto& var = vars[i];
-    auto& f = files[i];
+  for (unsigned v=0; v<nvars; ++v) {
+    auto& var = vars[v];
+    auto& f = files[v];
 
     // open file for reading
     f.fd = ::open((f.path = cat(
       "data/", var.name, mc ? "_mc.dat" : "_data.dat"
     )).c_str(), O_RDONLY);
     if (f.fd < 0) error("failed to open ",f.path);
-
-    TEST(f.path)
 
     // read headers -----------------------------------------------
     char buf[128]; // assume this is enough for any header
@@ -168,7 +173,7 @@ void read_events(F&& event_f) {
     if (!mc) { memcpy(&_lumi,m,sizeof(_lumi)); m += sizeof(_lumi); }
     memcpy(&_nevents,m,sizeof(_nevents));
 
-    if (i) {
+    if (v) {
       if (!mc) {
         if (_lumi != lumi) error("different lumi in ",f.path);
         if (_nevents != n_events_data)
@@ -202,8 +207,8 @@ void read_events(F&& event_f) {
   double event[sizeof(double)*2*maxnvars];
   for (;;) { // read data file in chunks of buffer size
     unsigned nevents = -1;
-    for (unsigned i=0; i<nvars; ++i) {
-      auto& f = files[i];
+    for (unsigned v=0; v<nvars; ++v) {
+      auto& f = files[v];
       const ssize_t nread = ::read(f.fd,f.buf+f.nbuf,f.buflen-f.nbuf);
       if (nread < 0) error("failed to read ",f.path);
       f.nbuf += nread;
@@ -214,8 +219,8 @@ void read_events(F&& event_f) {
     for (unsigned e=0; e<nevents; ++e) { // loop over events
       double* x = event;
       // combine events from multiple files
-      for (unsigned i=0; i<nvars; ++i) {
-        auto& f = files[i];
+      for (unsigned v=0; v<nvars; ++v) {
+        auto& f = files[v];
         const char* m = f.buf + f.event_size*e;
 
         for (unsigned n=(mc?2:1); n--; ++x) {
@@ -238,8 +243,8 @@ void read_events(F&& event_f) {
       } // for files
       // event_f(event); // call event processing function
     } // for events
-    for (unsigned i=0; i<nvars; ++i) {
-      auto& f = files[i];
+    for (unsigned v=0; v<nvars; ++v) {
+      auto& f = files[v];
       unsigned processed = f.event_size*nevents;
       if (f.nbuf -= processed)
         memmove(f.buf,f.buf+processed,f.nbuf);
@@ -318,7 +323,6 @@ try {
   }) - vars;
 
   if (nvars==0) error("no variables specified");
-  TEST(nvars)
 
   // binning ========================================================
   const uniform_axis myy_axis(55,105,160);
@@ -342,9 +346,9 @@ try {
       // TODO: don't use empty bins
 
       unsigned B = 0;
-      for (unsigned i=nvars; i; ) {
-        const auto& var = vars[--i];
-        const unsigned b = i ? var.index(x[i]) : myy_axis.index(m_yy);
+      for (unsigned v=nvars; v; ) {
+        const auto& var = vars[--v];
+        const unsigned b = v ? var.index(x[v]) : myy_axis.index(m_yy);
         if (b == unsigned(-1)) return;
         B = B * var.nbins + b;
       }
@@ -360,9 +364,9 @@ try {
       const double weight = x[1];
 
       unsigned B = 0;
-      for (unsigned i=nvars; i; ) {
-        const auto& var = vars[--i];
-        const unsigned b = var.index(x[i*2]);
+      for (unsigned v=nvars; v; ) {
+        const auto& var = vars[--v];
+        const unsigned b = var.index(x[v*2]);
         if (b == unsigned(-1)) return;
         B = B * var.nbins + b;
       }
@@ -387,10 +391,9 @@ try {
       << myy_axis.max << "],"
     "\"vars\":[";
 
-  bool first_var = true;
-  for (const auto& var : vars) {
-    if (first_var) first_var = false;
-    else cout << ',';
+  for (unsigned v=0; v<nvars; ++v) {
+    const auto& var = vars[v];
+    if (v) cout << ',';
     cout << "[\"" << var.name << "\",[";
     for (unsigned i=0, n=var.nbins+1; i<n; ++i) {
       if (i) cout << ',';

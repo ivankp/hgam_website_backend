@@ -134,12 +134,14 @@ public:
   }
 };
 
-int main(int argc, char** argv) { try {
+int main(int argc, char** argv) {
+  std::ios_base::sync_with_stdio(false);
   if (argc < 3) {
     cout << "usage: " << argv[0] << " output_dir input.root ...\n";
     return 1;
   }
 
+try {
   cout << "Input files:\n";
   for (int i=2; i<argc; ++i) {
     cout << argv[i] << '\n';
