@@ -17,6 +17,8 @@
 using std::cout;
 using ivan::cat, ivan::error;
 
+size_t round_down(size_t x, size_t n) noexcept { return x-(x%n); }
+
 struct uniform_axis {
   double min, max, width;
   unsigned nbins;
@@ -67,67 +69,19 @@ struct nonuniform_axis {
   }
 };
 
-template <auto f, typename T>
-auto guard(T x) {
-  class wrapper {
-    T x;
-  public:
-    wrapper(T x): x(x) { }
-    ~wrapper() { f(x); }
-    operator T() const noexcept { return x; }
-    T operator+() const noexcept { return x; }
-    auto&& operator=(T o) noexcept { return x = o; }
-  };
-  return wrapper(x);
-}
-
-template <
-  typename event_t,
-  typename H,
-  typename E
->
-void read_via_buffer(
-  const char* filename,
-  char* buffer,
-  size_t buffer_size,
-  H&& header_f,
-  E&& event_f
-) {
-  constexpr size_t event_size = sizeof(event_t);
-  // static_assert(event_size <= buffer_size);
-
-  auto fd = guard<::close>( ::open(filename,O_RDONLY) );
-  if (fd < 0) error("failed to open file ",filename);
-
-  bool header = true;
-  size_t nbuf = 0; // data left in the buffer
-  for (;;) { // read data file in chunks of buffer size
-    const ssize_t nread = ::read(+fd,buffer+nbuf,buffer_size-nbuf);
-    if (nread < 0) error("failed to read file ",filename);
-    if (nread == 0) {
-      if (nbuf) error("unusable data at the end of file ",filename);
-      break;
-    }
-    nbuf += nread;
-    event_t* e = reinterpret_cast<event_t*>(buffer);
-    if (header) {
-      const auto n = header_f(buffer,buffer+nbuf) - buffer;
-      nbuf -= n;
-      // assume that header size is a multiple of event_size
-      e = reinterpret_cast<event_t*>( reinterpret_cast<char*>(e) - n );
-      header = false;
-    }
-    for (;;) { // loop over events
-      if (nbuf < event_size) {
-        if (nbuf) memmove(buffer,e,nbuf);
-        break;
-      }
-      event_f(*e); // call event function
-      nbuf -= event_size;
-      ++e;
-    }
-  }
-}
+// template <auto f, typename T>
+// auto guard(T x) {
+//   class wrapper {
+//     T x;
+//   public:
+//     wrapper(T x): x(x) { }
+//     ~wrapper() { f(x); }
+//     operator T() const noexcept { return x; }
+//     T operator+() const noexcept { return x; }
+//     auto&& operator=(T o) noexcept { return x = o; }
+//   };
+//   return wrapper(x);
+// }
 
 unsigned is_var(const char* s) {
   if (!s) return 0;
@@ -137,25 +91,172 @@ unsigned is_var(const char* s) {
   if (*++s != '\0') return 0;
   return c - '0';
 }
+constexpr unsigned maxnvars = 9;
 
-int main(int argc, char** argv) { try {
+struct Var: nonuniform_axis {
+  std::string_view name;
+  Var(): nonuniform_axis(0,nullptr) { }
+  ~Var() { if (edges) free((void*)edges); }
+} vars[maxnvars];
+unsigned nvars = 0;
+
+double lumi = 0;
+uint64_t n_events_data = 0, n_events_mc = 0;
+double signal_region[2] { 121, 129 };
+
+template <bool mc, typename F>
+void read_events(F&& event_f) {
+  struct file {
+    char *buf = nullptr;
+    unsigned buflen, nbuf = 0, event_size;
+    int fd = -1;
+    char type;
+    std::string path;
+
+    ~file() {
+      if (fd >= 0) ::close(fd);
+      if (buf) ::free(buf);
+    }
+  } files[maxnvars];
+
+  // open files and read headers
+  for (unsigned i=0; i<nvars; ++i) {
+    auto& var = vars[i];
+    auto& f = files[i];
+
+    // open file for reading
+    f.fd = ::open((f.path = cat(
+      "data/", var.name, mc ? "_mc.dat" : "_data.dat"
+    )).c_str(), O_RDONLY);
+    if (f.fd < 0) error("failed to open ",f.path);
+
+    // read headers -----------------------------------------------
+    char buf[128]; // assume this is enough for any header
+    const char* m = buf;
+
+    const size_t header_tail_len = 2 + sizeof(lumi) + sizeof(n_events_data);
+    const size_t header_len = round_down(
+      var.name.size()+8 + header_tail_len, 8
+    );
+    if (sizeof(buf) < header_len)
+      error("insufficient header buffer size for ",f.path);
+
+    const ssize_t nread = ::read(f.fd,buf,header_len);
+    if (nread < 0) error("failed to read ",f.path);
+    if (nread != ssize_t(header_len))
+      error("failed to read whole header in ",f.path);
+
+    // check that variable name is as expected
+    if (var.name != m) error(f.path," does not start with ",var.name);
+
+    // next byte should be d or m
+    m += (header_len-header_tail_len);
+    if (*m != (mc ? 'm' : 'd')) error("wrong data marker in ",f.path);
+    // next byte specifies the variable type
+    f.type = *++m;
+    ++m;
+
+    // read constants
+    float _lumi;
+    uint64_t _nevents;
+
+    if (!mc) { memcpy(&_lumi,m,sizeof(_lumi)); m += sizeof(_lumi); }
+    memcpy(&_nevents,m,sizeof(_nevents));
+
+    if (i) {
+      if (!mc) {
+        if (_lumi != lumi) error("different lumi in ",f.path);
+        if (_nevents != n_events_data)
+          error("different number of events in ",f.path);
+      } else {
+        if (_nevents != n_events_mc)
+          error("different number of events in ",f.path);
+      }
+    } else {
+      if (!mc) {
+        lumi = _lumi;
+        n_events_data = _nevents;
+      } else {
+        n_events_mc = _nevents;
+      }
+    }
+
+    // allocate buffer
+    switch (f.type) {
+      case 'f': f.event_size = 4; break;
+      case 'i': f.event_size = 4; break;
+      case 'B': f.event_size = 1; break;
+      case 'c': f.event_size = 1; break;
+      default: error("unexpected type marker \'",f.type,"\' in ",f.path);
+    }
+    if (mc) f.event_size *= 2;
+    f.buflen = f.event_size * (1 << 16);
+    f.buf = static_cast<char*>(malloc(f.buflen));
+  }
+
+  double event[sizeof(double)*2*maxnvars];
+  for (;;) { // read data file in chunks of buffer size
+    unsigned nevents = -1;
+    for (unsigned i=0; i<nvars; ++i) {
+      auto& f = files[i];
+      const ssize_t nread = ::read(f.fd,f.buf+f.nbuf,f.buflen-f.nbuf);
+      if (nread < 0) error("failed to read ",f.path);
+      f.nbuf += nread;
+      const unsigned _nevents = f.nbuf / f.event_size;
+      if (_nevents < nevents) nevents = _nevents;
+    } // for files
+    if (nevents==0) break;
+    for (unsigned e=0; e<nevents; ++e) { // loop over events
+      double* x = event;
+      // combine events from multiple files
+      for (unsigned i=0; i<nvars; ++i) {
+        auto& f = files[i];
+        const char* m = f.buf + f.event_size*e;
+
+        for (unsigned n=(mc?2:1); n--; ++x) {
+          switch (f.type) {
+            case 'f':
+              *x = *reinterpret_cast<const float*>(m);
+              m += sizeof(float);
+              break;
+            case 'i':
+              *x = *reinterpret_cast<const int32_t*>(m);
+              m += sizeof(int32_t);
+              break;
+            case 'B':
+              *x = *reinterpret_cast<const uint8_t*>(m);
+              m += sizeof(uint8_t);
+              break;
+            case 'c':
+              *x = *reinterpret_cast<const char*>(m);
+              m += sizeof(char);
+              break;
+            default: ;
+          }
+        }
+      } // for files
+      event_f(event); // call event processing function
+    } // for events
+    for (unsigned i=0; i<nvars; ++i) {
+      auto& f = files[i];
+      unsigned processed = f.event_size*nevents;
+      if (f.nbuf -= processed)
+        memmove(f.buf,f.buf+processed,f.nbuf);
+    }
+  } // for ;;
+}
+
+int main(int argc, char** argv) {
+  std::ios_base::sync_with_stdio(false);
+  if (argc!=2) {
+    std::cerr << "usage: " << argv[0] << " query_string\n";
+    return 1;
+  }
+
+try {
   using clock = std::chrono::system_clock;
   using time  = std::chrono::time_point<clock>;
   const time start = clock::now();
-
-  std::ios_base::sync_with_stdio(false);
-
-  if (argc!=2) error("missing argument");
-
-  float lumi = 0;
-  struct var_t: nonuniform_axis {
-    std::string_view name;
-    var_t(): nonuniform_axis(0,nullptr) { }
-    ~var_t() { if (edges) free(const_cast<double*>(edges)); }
-  };
-  std::vector<var_t> vars; vars.reserve(9);
-  uint64_t n_events_data = 0, n_events_mc = 0;
-  double signal_region[2] { 121, 129 };
 
   // parse query string =============================================
   for (char *a=argv[1], *b=a, *c{};;) {
@@ -170,7 +271,6 @@ int main(int argc, char** argv) { try {
       }
     } else if (const unsigned xi = is_var(a)) {
       if (c && c!=b) {
-        if (vars.size() < xi) vars.resize(xi);
         auto& var = vars[xi-1];
 
         int i = 0;
@@ -212,6 +312,10 @@ int main(int argc, char** argv) { try {
     a = b+1;
   }
 
+  nvars = std::remove_if(vars,vars+maxnvars,[](const auto& var){
+    return var.name.empty();
+  }) - vars;
+
   // binning ========================================================
   const uniform_axis myy_axis(55,105,160);
 
@@ -227,95 +331,41 @@ int main(int argc, char** argv) { try {
   std::vector<data_bin> data_hist(n_data_bins);
   std::vector<  mc_bin>   mc_hist(n_mc_bins);
 
-  std::vector<char> buffer(1 << 15);
-
-#define READ(X) \
-  memcpy(&X,m,sizeof(X)); m += sizeof(X);
-
-  // TODO: read multiple files in parallel
-
-  read_via_buffer(
-    [&]{
-      std::vector<std::string> files;
-      files.reserve(vars.size());
-      for (const auto& var : vars)
-        files.emplace_back(cat("data/",var.name,"_data.dat"));
-      return files;
-    }(),
-    buffer.data(), buffer.size(),
-    [&](char* m, char* end){ // read header
-      if ((end-m) < (ssize_t)var.size()) goto too_short;
-      if (var != m) error("var name ",var," doesn't match in file");
-      m += var.size();
-
-      while (!*++m) { if (m==end) goto too_short; }
-      if (*m != 'd') error("wrong file type (not d)");
-      ++m;
-
-      if ((end-m) < (ssize_t)sizeof(lumi)) goto too_short;
-      READ(lumi)
-      if ((end-m) < (ssize_t)sizeof(n_events_data)) goto too_short;
-      READ(n_events_data)
-
-      return m;
-too_short:
-      error("file header is too short");
-    },
-    [&](double m_yy, double* x){ // read event
+  read_events<false>( // read data
+    [&](double* x){ // read event
+      const double m_yy = x[0];
       if (signal_region[0] <= m_yy && m_yy <= signal_region[1]) return;
       // TODO: don't use empty bins
 
       unsigned B = 0;
-      for (unsigned i=vars.size(); i; ) {
+      for (unsigned i=nvars; i; ) {
         const auto& var = vars[--i];
-        const unsigned b = var.index(x[i]);
+        const unsigned b = i ? var.index(x[i]) : myy_axis.index(m_yy);
         if (b == unsigned(-1)) return;
         B = B * var.nbins + b;
-      }
-      { const unsigned b = myy_axis.index(m_yy);
-        if (b == unsigned(-1)) return;
-        B = B * myy_axis.nbins + b;
       }
 
       ++data_hist[B].n;
     }
   );
 
-  // struct mc_event_t { float m_yy, var, truth, weight; };
-  read_via_buffer/*<mc_event_t>*/(
-    cat("data/",var,"_mc.dat").c_str(),
-    // "data/pT_yy_mc.dat",
-    buffer.data(), buffer.size(),
-    [&](char* m, char* end){ // read header
-      if ((end-m) < (ssize_t)var.size()) goto too_short;
-      if (var != m) error("var name ",var," doesn't match in file");
-      m += var.size();
-
-      while (!*++m) { if (m==end) goto too_short; }
-      if (*m != 'm') error("wrong file type (not m)");
-      ++m;
-
-      if ((end-m) < (ssize_t)sizeof(n_events_mc)) goto too_short;
-      READ(n_events_mc)
-
-      return m;
-too_short:
-      error("file header is too short");
-    },
-    [&](double m_yy, double* x){ // read event
+  read_events<true>( // read mc
+    [&](double* x){ // read event
+      const double m_yy = x[0];
       if (!(signal_region[0] <= m_yy && m_yy <= signal_region[1])) return;
+      const double weight = x[1];
 
       unsigned B = 0;
-      for (unsigned i=vars.size(); i; ) {
+      for (unsigned i=nvars; i; ) {
         const auto& var = vars[--i];
-        const unsigned b = var.index(x[i]);
+        const unsigned b = var.index(x[i*2]);
         if (b == unsigned(-1)) return;
         B = B * var.nbins + b;
       }
 
       auto& bin = mc_hist[B];
-      bin.w += e.weight;
-      bin.w2 += e.weight * e.weight;
+      bin.w += weight;
+      bin.w2 += weight * weight;
 
       // TODO: migration (compare truth & reco)
     }

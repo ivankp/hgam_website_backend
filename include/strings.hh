@@ -87,6 +87,16 @@ inline bool ends_with(const char* a, const char* b) noexcept {
   return !strcmp(a+i,b);
 }
 
+inline bool starts_with(const char* a, const char* b, size_t na) noexcept {
+  for (;;) {
+    if (!na) return false;
+    const char c = *b;
+    if (!c) return true;
+    if (*a != c) return false;
+    ++a; ++b; --na;
+  }
+}
+
 } // end namespace ivan
 
 #endif

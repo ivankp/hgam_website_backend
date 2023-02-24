@@ -37,9 +37,9 @@ double mc_factor = 0;
 template <typename T> constexpr char type_byte = '\0';
 // https://docs.python.org/3/library/struct.html#format-characters
 template <> constexpr char type_byte<float  > = 'f';
-template <> constexpr char type_byte<char   > = 'c';
 template <> constexpr char type_byte<int32_t> = 'i';
 template <> constexpr char type_byte<uint8_t> = 'B';
+template <> constexpr char type_byte<char   > = 'c';
 
 template <typename To, typename From>
 To ceiling_cast(From x) noexcept {
