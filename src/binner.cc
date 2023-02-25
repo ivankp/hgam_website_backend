@@ -340,6 +340,7 @@ try {
       const double m_yy = x[0];
       if (signal_region[0] <= m_yy && m_yy <= signal_region[1]) return;
       // TODO: don't use empty bins
+      ++x;
 
       unsigned B = 0;
       { for (unsigned v=nvars; v; ) {
@@ -361,6 +362,13 @@ try {
     [&](double* x){ // read event
       const double m_yy = x[0];
       if (!(signal_region[0] <= m_yy && m_yy <= signal_region[1])) return;
+      const double weight = x[1];
+      x += 2;
+
+      if (weight==0) {
+        TEST(m_yy)
+        TEST(weight)
+      }
 
       unsigned B = 0;
       for (unsigned v=nvars; v; ) {
@@ -371,13 +379,10 @@ try {
       }
 
       auto& bin = mc_hist[B];
-      const double weight = x[1];
       bin.w += weight;
       bin.w2 += weight * weight;
 
       // TODO: migration (compare truth & reco)
-      TEST(m_yy)
-      TEST(weight)
     }
   );
 

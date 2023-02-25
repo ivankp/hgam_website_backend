@@ -260,6 +260,7 @@ try {
 #undef VARS
 
     // LOOP over events =============================================
+    double weight;
     for (
       ivan::timed_counter<Long64_t> ent(reader.GetEntries(true));
       reader.Next();
@@ -268,6 +269,11 @@ try {
       // selection cut
       if (!*b_isPassed) continue;
 
+      if (mc) {
+        weight = **b_weight;
+        if (weight==0) continue;
+      }
+
       // diphoton mass cut
       const float m_yy = *b_m_yy*1e-3;
       if (m_yy < 105 || 160 < m_yy) continue;
@@ -275,10 +281,10 @@ try {
       ++nevents;
 
       f_m_yy.write(m_yy);
-
       if (mc) f_m_yy.write<float>( // weight
-        double(**b_weight) * double(**b_cs_br_fe) * mc_factor
+        weight * double(**b_cs_br_fe) * mc_factor
       );
+      // TODO: weightCatXS
 
       // ============================================================
       const uint8_t N_j_30 = ceiling_cast<uint8_t>(*b_N_j_30);
