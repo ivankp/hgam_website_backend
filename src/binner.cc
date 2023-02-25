@@ -2,6 +2,7 @@
 #include <iomanip>
 #include <algorithm>
 #include <chrono>
+#include <limits>
 #include <vector>
 
 #include <cstdlib>
@@ -20,6 +21,11 @@ using ivan::cat, ivan::error;
 
 size_t round_down(size_t x, size_t n) noexcept { return x-(x%n); }
 
+template <typename T>
+constexpr T sq(T x) noexcept { return x*x; }
+
+constexpr unsigned overflow = std::numeric_limits<unsigned>::max();
+
 struct uniform_axis {
   double min, max, width;
   unsigned nbins;
@@ -29,7 +35,7 @@ struct uniform_axis {
 
   unsigned index(double x) const noexcept {
     // no overflow or underflow
-    if (x < min || max <= x) return -1;
+    if (x < min || max <= x) return overflow;
     return (x-min)/width;
   }
 
@@ -62,7 +68,7 @@ struct nonuniform_axis {
       }
     }
     const unsigned i = (p - edges) - 1;
-    return i == nbins ? -1 : i;
+    return i == nbins ? overflow : i;
   }
 
   double edge(unsigned i) const noexcept {
@@ -325,15 +331,16 @@ try {
   struct data_bin { unsigned long n=0; };
   struct   mc_bin { double w=0, w2=0; };
 
-  unsigned n_data_bins = myy_axis.nbins;
-  unsigned n_mc_bins = 1;
+  unsigned nbins_data = myy_axis.nbins;
+  unsigned nbins_mc = 1;
   for (unsigned v=nvars; v; ) {
     const auto nbins = vars[--v].nbins;
-    n_data_bins *= nbins;
-    n_mc_bins *= nbins;
+    nbins_data *= nbins;
+    nbins_mc *= nbins;
   }
-  std::vector<data_bin> data_hist(n_data_bins);
-  std::vector<  mc_bin>   mc_hist(n_mc_bins);
+  std::vector<data_bin> data_hist(nbins_data);
+  std::vector<  mc_bin>   mc_hist(nbins_mc);
+  std::vector<double> migration_hist(sq(nbins_mc));
 
   read_events<false>( // read data
     [&](double* x){ // read event
@@ -346,11 +353,11 @@ try {
       { for (unsigned v=nvars; v; ) {
           const auto& var = vars[--v];
           const unsigned b = var.index(x[v]);
-          if (b == unsigned(-1)) return;
+          if (b == overflow) return;
           B = B * var.nbins + b;
         }
         const unsigned b = myy_axis.index(m_yy);
-        if (b == unsigned(-1)) return;
+        if (b == overflow) return;
         B = B * myy_axis.nbins + b;
       }
 
@@ -365,24 +372,26 @@ try {
       const double weight = x[1];
       x += 2;
 
-      if (weight==0) {
-        TEST(m_yy)
-        TEST(weight)
-      }
-
-      unsigned B = 0;
+      unsigned B = 0, Bt/*truth*/ = 0;
       for (unsigned v=nvars; v; ) {
         const auto& var = vars[--v];
-        const unsigned b = var.index(x[v*2]);
-        if (b == unsigned(-1)) return;
-        B = B * var.nbins + b;
+        { const unsigned b = var.index(x[v*2]);
+          if (b == overflow) return;
+          B = B * var.nbins + b;
+        }
+        if (Bt != overflow) {
+          const unsigned b = var.index(x[v*2+1]);
+          Bt = ( b==overflow ? overflow : (Bt * var.nbins + b) );
+        }
       }
 
       auto& bin = mc_hist[B];
       bin.w += weight;
       bin.w2 += weight * weight;
 
-      // TODO: migration (compare truth & reco)
+      if (Bt != overflow) {
+        migration_hist[B*nbins_mc+Bt] += weight;
+      }
     }
   );
 
@@ -414,7 +423,7 @@ try {
   cout << "],"
     "\"sig\":[";
 
-  for (unsigned i=0; i<n_mc_bins; ++i) {
+  for (unsigned i=0; i<nbins_mc; ++i) {
     if (i) cout << ',';
     cout << mc_hist[i].w * lumi;
   }
@@ -422,9 +431,17 @@ try {
   cout << "],"
     "\"sig_sys\":[";
 
-  for (unsigned i=0; i<n_mc_bins; ++i) {
+  for (unsigned i=0; i<nbins_mc; ++i) {
     if (i) cout << ',';
     cout << std::sqrt(mc_hist[i].w2) * lumi;
+  }
+
+  cout << "],"
+    "\"migration\":[";
+
+  for (unsigned i=0, n=sq(nbins_mc); i<n; ++i) {
+    if (i) cout << ',';
+    cout << migration_hist[i] * lumi;
   }
 
   cout << "],"
