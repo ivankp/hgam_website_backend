@@ -16,11 +16,12 @@ struct xtos { };
 
 template <typename T>
 #if __cplusplus < 202002L
-struct xtos<T,std::enable_if_t<std::is_arithmetic_v<T>>> {
+struct xtos<T,std::enable_if_t<std::is_arithmetic_v<T>>>
 #else
 requires std::is_arithmetic_v<T>
-struct xtos<T> {
+struct xtos<T>
 #endif
+{
   unsigned char n;
   char s[
     std::is_integral_v<T>

@@ -28,7 +28,7 @@ inline auto to_string_view(const T& x) noexcept {
   else if constexpr (std::is_constructible_v<xtos<T>,const T&>)
     return xtos<T>(x);
 #endif
-  else if constexpr (std::is_constructible_v<std::string_view,const T&>)
+  else if constexpr (std::is_convertible_v<T,std::string_view>)
     return std::string_view(x);
   else
     return failed_string_view_conversion<T>{};
