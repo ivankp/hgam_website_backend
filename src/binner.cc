@@ -5,6 +5,7 @@
 #include <numeric>
 #include <chrono>
 #include <limits>
+// #include <vector>
 
 #include <cstdlib>
 #include <cstring>
@@ -17,7 +18,7 @@
 #include "pool.hh"
 #include "numconv.hh"
 #include "error.hh"
-#include "debug.hh"
+// #include "debug.hh"
 
 using std::cout;
 using ivan::cat, ivan::error, ivan::cnt_of;

@@ -5,6 +5,9 @@
 #include <type_traits>
 #include <tuple>
 
+// pool<0> uses calloc, allocated memory is zeroed out
+// pool<1> uses malloc, allocated memory is NOT initialized
+
 namespace ivan {
 
 template <typename T>
@@ -58,23 +61,24 @@ auto pool(T... n) -> std::enable_if_t<
 template <bool use_malloc, typename... T>
 auto pool(cnt_of<T>... n) -> pool_pointers<T...> {
   static constexpr size_t N = sizeof...(T);
-  size_t pad[N] { alignof(T)*n... };
+  size_t len[N+1] { 0, (sizeof(T)*n)... };
   size_t i = 0;
   ([&](auto t){
     if (i) {
       using type = typename decltype(t)::type;
-      const size_t r = pad[i-1] % alignof(type);
-      pad[i] += pad[i-1] + (r ? alignof(type)-r : size_t(0));
+      size_t r = len[i] % alignof(type);
+      if (r) r = alignof(type) - r;
+      len[i+1] += (len[i] += r);
     }
     ++i;
   }(type_constant<T>{}),...);
   char* m;
   if constexpr (use_malloc)
-    m = static_cast<char*>(malloc(pad[N-1]));
+    m = static_cast<char*>(malloc(len[N]));
   else
-    m = static_cast<char*>(calloc(1,pad[N-1]));
+    m = static_cast<char*>(calloc(len[N],1));
   i = 0;
-  return {{ reinterpret_cast<T*>(m+pad[i++])... }};
+  return {{ reinterpret_cast<T*>(m+len[i++])... }};
 }
 
 }
