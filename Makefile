@@ -23,6 +23,9 @@ all: $(EXE)
 bin/binner: LDFLAGS += -static -static-libgcc -static-libstdc++
 bin/binner: .build/linalg.o .build/least_squares.o
 
+.build/vars.o: CPPSTD = c++17
+bin/vars: LDFLAGS += -static -static-libgcc -static-libstdc++
+
 ifneq (, $(shell which root-config))
 ROOT_CFLAGS  := $(shell root-config --cflags | sed 's/ -std=c++[^ ]\+ / /')
 ROOT_LDFLAGS := $(shell root-config --ldflags)
@@ -32,9 +35,9 @@ ROOT_LDLIBS  := $(shell root-config --libs)
 bin/convert_mxaods: LDFLAGS += $(ROOT_LDFLAGS)
 bin/convert_mxaods: LDLIBS  += $(ROOT_LDLIBS)
 
-.build/varlist.o: CFLAGS += $(ROOT_CFLAGS)
-bin/varlist: LDFLAGS += $(ROOT_LDFLAGS)
-bin/varlist: LDLIBS  += $(ROOT_LDLIBS)
+.build/mxaod_vars.o: CFLAGS += $(ROOT_CFLAGS)
+bin/mxaod_vars: LDFLAGS += $(ROOT_LDFLAGS)
+bin/mxaod_vars: LDLIBS  += $(ROOT_LDLIBS)
 endif
 
 .PRECIOUS: .build/%.o
