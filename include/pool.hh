@@ -4,14 +4,12 @@
 #include <cstdlib>
 #include <type_traits>
 #include <tuple>
+#include "traits.hh"
 
 // pool<0> uses calloc, allocated memory is zeroed out
 // pool<1> uses malloc, allocated memory is NOT initialized
 
 namespace ivan {
-
-template <typename T>
-struct type_constant { using type = T; };
 
 template <typename T = double>
 struct cnt_of {

@@ -12,9 +12,6 @@ struct type_constant { using type = T; };
 template <typename...>
 struct type_sequence { };
 
-template <size_t I>
-using index_constant = std::integral_constant<size_t,I>;
-
 }
 
 #endif
