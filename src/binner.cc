@@ -5,7 +5,6 @@
 #include <numeric>
 #include <chrono>
 #include <limits>
-#include <vector>
 
 #include <cstdlib>
 #include <cstring>
@@ -21,7 +20,7 @@
 #include "debug.hh"
 
 using std::cout;
-using ivan::cat, ivan::error;
+using ivan::cat, ivan::error, ivan::cnt_of;
 
 // Global variables =================================================
 double data_lumi = 0, lumi = 0;
@@ -372,18 +371,22 @@ try {
   const unsigned myy_nbins_sides  = myy_nbins_left + myy_nbins_right;
   const unsigned myy_nbins_signal = myy_axis.nbins - myy_nbins_sides;
 
-  struct data_bin { unsigned long n=0; };
-  struct   mc_bin { double w=0, w2=0; };
-
   unsigned nbins_vars = 1;
   for (unsigned v=nvars; v; ) {
     nbins_vars *= vars[--v].nbins;
   }
   const unsigned nbins_data = myy_nbins_sides * nbins_vars;
 
-  std::vector<data_bin> data_hist(nbins_data);
-  std::vector<  mc_bin>   mc_hist(nbins_vars);
-  std::vector<double> migration_hist(sq(nbins_vars));
+  struct data_bin { unsigned long n=0; };
+  struct   mc_bin { double w=0, w2=0; };
+
+  const auto [
+    data_hist, mc_hist, migration_hist
+  ] = ivan::pool<0>(
+    cnt_of<data_bin>(nbins_data),
+    cnt_of<  mc_bin>(nbins_vars),
+    cnt_of<double  >(sq(nbins_vars))
+  );
 
   read_events<false>( // read data
     [&](double* x){ // read event
@@ -449,7 +452,7 @@ try {
 
     const auto [
       y, u, A, W, P, cov
-    ] = ivan::pool<double>(
+    ] = ivan::pool<1>(
       nb, nb, nb*np, N+nb, np, N
     );
 
@@ -467,7 +470,7 @@ try {
       }
     }
 
-    const auto* h = data_hist.data();
+    const auto* h = data_hist;
     for (unsigned b=0; b<nbins_vars; ++b) {
       for (unsigned i=0; i<nb; ++i, ++h) {
         const double n = h->n;
@@ -539,7 +542,7 @@ try {
 
   cout << "],"
     "\"bkg\":[";
-  {  const auto* h = data_hist.data();
+  {  const auto* h = data_hist;
     for (unsigned i=0; i<nbins_vars; ++i) {
       if (i) cout << ',';
       const auto* h2 = h + myy_nbins_left;
