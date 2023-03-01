@@ -1,6 +1,8 @@
 #include <iostream>
+#include <sstream>
 #include <iomanip>
 #include <algorithm>
+#include <numeric>
 #include <chrono>
 #include <limits>
 #include <vector>
@@ -12,12 +14,25 @@
 #include <unistd.h>
 #include <fcntl.h>
 
+#include "least_squares.h"
+#include "pool.hh"
 #include "numconv.hh"
 #include "error.hh"
 #include "debug.hh"
 
 using std::cout;
 using ivan::cat, ivan::error;
+
+// Global variables =================================================
+double data_lumi = 0, lumi = 0;
+uint64_t nevents_data = 0, nevents_mc = 0;
+double fiducial_myy[] { 105, 160 };
+double   signal_myy[] { 121, 129 };
+double myy_binwidth = 1;
+constexpr unsigned maxnvars = 9;
+unsigned nvars = 0;
+int ExpPolyN = 0;
+// ==================================================================
 
 size_t round_down(size_t x, size_t n) noexcept { return x-(x%n); }
 
@@ -84,7 +99,6 @@ unsigned is_var(const char* s) {
   if (*++s != '\0') return 0;
   return c - '0';
 }
-constexpr unsigned maxnvars = 9;
 
 struct Var: nonuniform_axis {
   std::string_view name;
@@ -98,11 +112,6 @@ struct Var: nonuniform_axis {
   }
   ~Var() { if (edges) { free((void*)edges); } }
 } vars[maxnvars];
-unsigned nvars = 0;
-
-double lumi = 0;
-uint64_t nevents_data = 0, nevents_mc = 0;
-double signal_region[2] { 121, 129 };
 
 template <bool mc, typename F>
 void read_events(F&& event_f) {
@@ -170,7 +179,7 @@ void read_events(F&& event_f) {
 
     if (v) {
       if (!mc) {
-        if (_lumi != lumi) error("different lumi in ",f.path);
+        if (_lumi != data_lumi) error("different lumi in ",f.path);
         if (_nevents != nevents_data)
           error("different number of events in ",f.path);
       } else {
@@ -179,7 +188,7 @@ void read_events(F&& event_f) {
       }
     } else {
       if (!mc) {
-        lumi = _lumi;
+        data_lumi = _lumi;
         nevents_data = _nevents;
       } else {
         nevents_mc = _nevents;
@@ -266,6 +275,7 @@ try {
   const time start = clock::now();
 
   // parse query string =============================================
+  bool fit_passed = false;
   for (char *a=argv[1], *b=a, *c{};;) {
     b = strchr(a,'&');
     if (b) *b = '\0';
@@ -275,6 +285,19 @@ try {
     if (!strcmp(a,"lumi")) {
       if (c && c!=b) {
         lumi = atof(c);
+        if (lumi <= 0) lumi = 0;
+      }
+    } else if (!strcmp(a,"fit")) {
+      if (c && c!=b) {
+        if (ivan::starts_with(c,"ExpPoly")) {
+          c += 7;
+          const char d = *c;
+          if (d < '0' || '5' < d || c[1]!='\0') error(
+            "invalid ExpPoly fit function degree ",c
+          );
+          ExpPolyN = d - '0';
+          fit_passed = true;
+        } else error("invalid fit function ",c);
       }
     } else if (const unsigned xi = is_var(a)) {
       if (c && c!=b) {
@@ -325,28 +348,47 @@ try {
 
   if (nvars==0) error("no variables specified");
 
-  // binning ========================================================
-  const uniform_axis myy_axis(55,105,160);
+  // Binning ========================================================
+  const uniform_axis myy_axis(
+    round((fiducial_myy[1]-fiducial_myy[0])/myy_binwidth),
+    fiducial_myy[0],
+    fiducial_myy[1]
+  );
+  if (myy_binwidth != myy_axis.width) error(
+    "m_yy bin width does not fit into the fiducial region "
+    "a whole number of times"
+  );
+
+  // make sure signal region matches bit edges
+  const unsigned myy_nbins_left =
+    floor( (signal_myy[0]-fiducial_myy[0])/myy_binwidth );
+  const unsigned myy_nbins_right =
+    ceil ( (fiducial_myy[1]-signal_myy[1])/myy_binwidth );
+
+  signal_myy[0] = fiducial_myy[0] + myy_nbins_left *myy_binwidth;
+  signal_myy[1] = fiducial_myy[1] - myy_nbins_right*myy_binwidth;
+
+  // exclude signal region bins
+  const unsigned myy_nbins_sides  = myy_nbins_left + myy_nbins_right;
+  const unsigned myy_nbins_signal = myy_axis.nbins - myy_nbins_sides;
 
   struct data_bin { unsigned long n=0; };
   struct   mc_bin { double w=0, w2=0; };
 
-  unsigned nbins_data = myy_axis.nbins;
-  unsigned nbins_mc = 1;
+  unsigned nbins_vars = 1;
   for (unsigned v=nvars; v; ) {
-    const auto nbins = vars[--v].nbins;
-    nbins_data *= nbins;
-    nbins_mc *= nbins;
+    nbins_vars *= vars[--v].nbins;
   }
+  const unsigned nbins_data = myy_nbins_sides * nbins_vars;
+
   std::vector<data_bin> data_hist(nbins_data);
-  std::vector<  mc_bin>   mc_hist(nbins_mc);
-  std::vector<double> migration_hist(sq(nbins_mc));
+  std::vector<  mc_bin>   mc_hist(nbins_vars);
+  std::vector<double> migration_hist(sq(nbins_vars));
 
   read_events<false>( // read data
     [&](double* x){ // read event
-      const double m_yy = x[0];
-      if (signal_region[0] <= m_yy && m_yy <= signal_region[1]) return;
-      // TODO: don't use empty bins
+      const double myy = x[0];
+      if (signal_myy[0] <= myy && myy <= signal_myy[1]) return;
       ++x;
 
       unsigned B = 0;
@@ -356,9 +398,11 @@ try {
           if (b == overflow) return;
           B = B * var.nbins + b;
         }
-        const unsigned b = myy_axis.index(m_yy);
+        unsigned b = myy_axis.index(myy);
         if (b == overflow) return;
-        B = B * myy_axis.nbins + b;
+        if (b > myy_nbins_left) // safe because of myy cut above
+          b -= myy_nbins_signal;
+        B = B * myy_nbins_sides + b;
       }
 
       ++data_hist[B].n;
@@ -367,8 +411,8 @@ try {
 
   read_events<true>( // read mc
     [&](double* x){ // read event
-      const double m_yy = x[0];
-      if (!(signal_region[0] <= m_yy && m_yy <= signal_region[1])) return;
+      const double myy = x[0];
+      if (!(signal_myy[0] <= myy && myy <= signal_myy[1])) return;
       const double weight = x[1];
       x += 2;
 
@@ -390,17 +434,74 @@ try {
       bin.w2 += weight * weight;
 
       if (Bt != overflow) {
-        migration_hist[B*nbins_mc+Bt] += weight;
+        migration_hist[B*nbins_vars+Bt] += weight;
       }
     }
   );
 
+  // Fit ============================================================
+  std::stringstream fits;
+
+  if (!fit_passed) ExpPolyN = 2;
+  { const unsigned np = ExpPolyN + 1;
+    const unsigned nb = myy_nbins_sides;
+    const unsigned N = np*(np+1)/2;
+
+    const auto [
+      y, u, A, W, P, cov
+    ] = ivan::pool<double>(
+      nb, nb, nb*np, N+nb, np, N
+    );
+
+    { double* a = A;
+      for (unsigned i=0; i<nb; ++i, ++a) {
+        *a = 1;
+      }
+      for (unsigned p=1; p<np; ++p) {
+        for (unsigned i=0; i<nb; ++i, ++a) {
+          const double x =
+            ( ( i<myy_nbins_left ? i : i+myy_nbins_signal ) + 0.5 ) // center
+            * myy_binwidth - (125. - fiducial_myy[0]);
+          *a = *(a-nb) * x;
+        }
+      }
+    }
+
+    const auto* h = data_hist.data();
+    for (unsigned b=0; b<nbins_vars; ++b) {
+      for (unsigned i=0; i<nb; ++i, ++h) {
+        const double n = h->n;
+        if (n > 0) {
+          y[i] = std::log(n);
+          u[i] = 1./std::sqrt(n);
+        } else {
+          y[i] = -1;
+          u[i] = 10;
+        }
+      }
+
+      linear_least_squares(A, y, u, nb, np, W, P, cov);
+
+      if (b) fits << ',';
+      fits << '[';
+      for (unsigned p=0; p<np; ++p) {
+        if (p) fits << ',';
+        fits << P[p];
+      }
+      fits << ']';
+    }
+  }
+
   // JSON response ==================================================
+  if (lumi == 0) lumi = data_lumi;
   cout << "{"
-    "\"lumi\":" << lumi << ","
+    "\"lumi\":[" << lumi;
+  if (lumi != data_lumi) cout << ',' << data_lumi;
+  cout << "],"
     "\"nevents_data\":" << nevents_data << ","
     "\"nevents_mc\":" << nevents_mc << ","
-    "\"signal_region\":[" << signal_region[0] <<','<< signal_region[1] << "],"
+    "\"fiducial_myy\":[" << fiducial_myy[0] <<','<< fiducial_myy[1] << "],"
+    "\"signal_myy\":[" << signal_myy[0] <<','<< signal_myy[1] << "],"
     "\"m_yy\":["
       << myy_axis.nbins << ','
       << myy_axis.min << ','
@@ -423,7 +524,7 @@ try {
   cout << "],"
     "\"sig\":[";
 
-  for (unsigned i=0; i<nbins_mc; ++i) {
+  for (unsigned i=0; i<nbins_vars; ++i) {
     if (i) cout << ',';
     cout << mc_hist[i].w * lumi;
   }
@@ -431,15 +532,34 @@ try {
   cout << "],"
     "\"sig_sys\":[";
 
-  for (unsigned i=0; i<nbins_mc; ++i) {
+  for (unsigned i=0; i<nbins_vars; ++i) {
     if (i) cout << ',';
     cout << std::sqrt(mc_hist[i].w2) * lumi;
   }
 
   cout << "],"
+    "\"bkg\":[";
+  {  const auto* h = data_hist.data();
+    for (unsigned i=0; i<nbins_vars; ++i) {
+      if (i) cout << ',';
+      const auto* h2 = h + myy_nbins_left;
+      cout << '['
+        << std::accumulate(h,h2,0ul,[](auto a, auto x){ return a+x.n; })
+        << ',';
+      h += myy_nbins_sides;
+      cout << 0 << ',';
+      cout << std::accumulate(h2,h,0ul,[](auto a, auto x){ return a+x.n; })
+        << ']';
+    }
+  }
+
+  cout << "],"
+    "\"fit\":[" << fits.rdbuf();
+
+  cout << "],"
     "\"migration\":[";
 
-  for (unsigned i=0, n=sq(nbins_mc); i<n; ++i) {
+  for (unsigned i=0, n=sq(nbins_vars); i<n; ++i) {
     if (i) cout << ',';
     cout << migration_hist[i] * lumi;
   }
