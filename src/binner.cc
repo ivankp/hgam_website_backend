@@ -91,6 +91,24 @@ struct nonuniform_axis {
   }
 };
 
+template <typename F> // n ≥ 1
+double simpson(double a, double b, unsigned n, F&& f) {
+  double h = (b-a)/n, h2 = h/2, sum1 = 0, sum2 = f(h2);
+  for (unsigned i=1; i<n; ++i) {
+    double x = a + h*i;
+    sum1 += f(x);
+    sum2 += f(x+h2);
+  }
+  return h/6 * (f(a) + f(b) + sum1*2 + sum2*4);
+}
+
+double poly(double x, const double* c, unsigned n) {
+  const double *end = c+n;
+  double f = *c, y = 1;
+  while (++c < end) f += *c*(y*=x);
+  return f;
+}
+
 unsigned is_var(const char* s) {
   if (!s) return 0;
   if (*s != 'x') return 0;
@@ -382,11 +400,13 @@ try {
   struct   mc_bin { double w=0, w2=0; };
 
   const auto [
-    data_hist, mc_hist, migration_hist
+    data_hist, mc_hist, migration_hist,
+    fit_bkg // background in the signal region form fit to data
   ] = ivan::pool<0>(
     cnt_of<data_bin>(nbins_data),
     cnt_of<  mc_bin>(nbins_vars),
-    cnt_of<double  >(sq(nbins_vars))
+    cnt_of<double  >(sq(nbins_vars)),
+    nbins_vars // double is default type
   );
 
   read_events<false>( // read data
@@ -444,7 +464,7 @@ try {
   );
 
   // Fit ============================================================
-  std::stringstream fits;
+  std::stringstream fit_params;
 
   if (!fit_passed) ExpPolyN = 2;
   { const unsigned np = ExpPolyN + 1;
@@ -486,30 +506,49 @@ try {
 
       linear_least_squares(A, y, u, nb, np, W, P, cov);
 
-      if (b) fits << ',';
-      fits << '[';
+      fit_bkg[b] = simpson(
+        signal_myy[0]-125,
+        signal_myy[1]-125,
+        100,
+        [&](double x){ return std::exp(poly( x, P, np )); }
+      );
+
+      if (b) fit_params << ',';
+      fit_params << '[';
       for (unsigned p=0; p<np; ++p) {
-        if (p) fits << ',';
-        fits << P[p];
+        if (p) fit_params << ',';
+        fit_params << P[p];
       }
-      fits << ']';
+      fit_params << ']';
     }
   }
 
-  // JSON response ==================================================
+  // Luminosity =====================================================
   if (lumi == 0) lumi = data_lumi;
+  static const double lumi_rat = lumi / data_lumi;
+
+  auto cout_data_val = [](auto x){
+    if (lumi_rat == 1) cout << x;
+    else cout << (x * lumi_rat);
+  };
+  auto cout_mc_val = [](auto x){
+    cout << (x * lumi);
+  };
+
+  // JSON response ==================================================
   cout << "{"
     "\"lumi\":[" << lumi;
   if (lumi != data_lumi) cout << ',' << data_lumi;
   cout << "],"
-    "\"nevents_data\":" << nevents_data << ","
-    "\"nevents_mc\":" << nevents_mc << ","
-    "\"fiducial_myy\":[" << fiducial_myy[0] <<','<< fiducial_myy[1] << "],"
-    "\"signal_myy\":[" << signal_myy[0] <<','<< signal_myy[1] << "],"
-    "\"m_yy\":["
-      << myy_axis.nbins << ','
-      << myy_axis.min << ','
-      << myy_axis.max << "],"
+    "\"nevents\":{"
+      "\"data\":" << nevents_data << ","
+      "\"mc\":" << nevents_mc
+     << "},"
+    "\"m_yy\":{"
+      "\"fiducial\":[" << fiducial_myy[0] <<','<< fiducial_myy[1] << "],"
+      "\"signal\":[" << signal_myy[0] <<','<< signal_myy[1] << "],"
+      "\"bin_width\":" << myy_binwidth
+      << "},"
     "\"vars\":[";
 
   for (unsigned v=0; v<nvars; ++v) {
@@ -530,7 +569,7 @@ try {
 
   for (unsigned i=0; i<nbins_vars; ++i) {
     if (i) cout << ',';
-    cout << mc_hist[i].w * lumi;
+    cout_mc_val( mc_hist[i].w );
   }
 
   cout << "],"
@@ -538,35 +577,62 @@ try {
 
   for (unsigned i=0; i<nbins_vars; ++i) {
     if (i) cout << ',';
-    cout << std::sqrt(mc_hist[i].w2) * lumi;
+    cout_mc_val( std::sqrt(mc_hist[i].w2) );
   }
 
   cout << "],"
     "\"bkg\":[";
-  {  const auto* h = data_hist;
+
+  { const auto* h = data_hist;
     for (unsigned i=0; i<nbins_vars; ++i) {
       if (i) cout << ',';
       const auto* h2 = h + myy_nbins_left;
-      cout << '['
-        << std::accumulate(h,h2,0ul,[](auto a, auto x){ return a+x.n; })
-        << ',';
+      cout << '[';
+
+      cout_data_val(
+        std::accumulate(h,h2,0ul,[](auto a, auto x){ return a+x.n; })
+      );
+      cout << ',';
+
+      cout << fit_bkg[i] << ',';
+
       h += myy_nbins_sides;
-      cout << 0 << ',';
-      cout << std::accumulate(h2,h,0ul,[](auto a, auto x){ return a+x.n; })
-        << ']';
+      cout_data_val(
+        std::accumulate(h2,h,0ul,[](auto a, auto x){ return a+x.n; })
+      );
+      cout << ']';
     }
   }
 
   cout << "],"
-    "\"fit\":[" << fits.rdbuf();
+    "\"hist\":[";
+
+  { const auto* h = data_hist;
+    for (unsigned i=0; i<nbins_vars; ++i) {
+      if (i) cout << ',';
+      cout << "[[";
+      for (unsigned j=0; j<myy_nbins_sides; ++j, ++h) {
+        if (j) cout << (j != myy_nbins_left ? "," : "],[");
+        cout_data_val( h->n );
+      }
+      cout << "]]";
+    }
+  }
 
   cout << "],"
     "\"migration\":[";
 
   for (unsigned i=0, n=sq(nbins_vars); i<n; ++i) {
     if (i) cout << ',';
-    cout << migration_hist[i] * lumi;
+    cout_mc_val( migration_hist[i] );
   }
+
+  cout << "],"
+    "\"fit_fcn\":"
+      << "\"ExpPoly" << ExpPolyN << "\"";
+
+  cout << ","
+    "\"fit\":[" << fit_params.rdbuf();
 
   cout << "],"
     "\"time\":"
