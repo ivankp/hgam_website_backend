@@ -23,9 +23,6 @@ all: $(EXE)
 bin/binner: LDFLAGS += -static -static-libgcc -static-libstdc++
 bin/binner: .build/linalg.o .build/least_squares.o
 
-.build/vars.o: CPPSTD = c++17
-bin/vars: LDFLAGS += -static -static-libgcc -static-libstdc++
-
 ifneq (, $(shell which root-config))
 ROOT_CFLAGS  := $(shell root-config --cflags | sed 's/ -std=c++[^ ]\+ / /')
 ROOT_LDFLAGS := $(shell root-config --ldflags)
