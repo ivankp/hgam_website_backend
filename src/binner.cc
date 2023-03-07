@@ -24,7 +24,7 @@ using std::cout;
 using ivan::cat, ivan::error, ivan::cnt_of;
 
 // Global variables =================================================
-double data_lumi = 0, lumi = 0;
+double data_lumi = 0, lumi = 0, lumi_rat = 1;
 uint64_t nevents_data = 0, nevents_mc = 0;
 double fiducial_myy[] { 105, 160 };
 double   signal_myy[] { 121, 129 };
@@ -524,8 +524,15 @@ try {
   }
 
   // Luminosity =====================================================
-  if (lumi == 0) lumi = data_lumi;
-  static const double lumi_rat = lumi / data_lumi;
+  if (lumi == 0) {
+    lumi = data_lumi;
+  } else if (lumi != data_lumi) {
+    lumi_rat = lumi / data_lumi;
+    if (std::abs(lumi_rat-1) < 1e-6) {
+      lumi = data_lumi;
+      lumi_rat = 1;
+    }
+  }
 
   auto cout_data_val = [](auto x){
     if (lumi_rat == 1) cout << x;
@@ -538,7 +545,7 @@ try {
   // JSON response ==================================================
   cout << "{"
     "\"lumi\":[" << lumi;
-  if (lumi != data_lumi) cout << ',' << data_lumi;
+  if (lumi_rat != 1) cout << ',' << data_lumi;
   cout << "],"
     "\"nevents\":{"
       "\"data\":" << nevents_data << ","

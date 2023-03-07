@@ -152,7 +152,7 @@ try {
     if (std::regex_search(argv[i],match,re)) {
       if (i>2 &&  mc) ERROR("data file after mc files");
       mc = false;
-      lumi += ivan::stox<double>(match[1].str());
+      lumi += atof(match[1].str().c_str());
     } else {
       if (i>2 && !mc) ERROR("mc file after data files");
       mc = true;
