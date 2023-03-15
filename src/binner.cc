@@ -524,7 +524,7 @@ try {
   }
 
   // Luminosity =====================================================
-  if (lumi == 0) {
+  if (lumi <= 0) {
     lumi = data_lumi;
   } else if (lumi != data_lumi) {
     lumi_rat = lumi / data_lumi;
