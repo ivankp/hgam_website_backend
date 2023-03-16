@@ -291,66 +291,56 @@ try {
       f_N_j_30.write(N_j_30);
       if (mc) f_N_j_30.write(ceiling_cast<uint8_t>(**b_N_j_30_truth));
 
-#define VAR(TYPE,NAME) \
-  const TYPE NAME = *b_##NAME; \
+#define _1e3(X) (X)*1e-3
+
+#define VAR(TYPE,NAME,F) \
+  const TYPE NAME = F(*b_##NAME); \
   f_##NAME.write(NAME); \
-  if (mc) f_##NAME.write<TYPE>(**b_##NAME##_truth);
+  if (mc) f_##NAME.write<TYPE>(F(**b_##NAME##_truth));
 
-#define VAR_1e3(NAME) \
-  const float NAME = *b_##NAME * 1e-3; \
-  f_##NAME.write(NAME); \
-  if (mc) f_##NAME.write<float>(**b_##NAME##_truth * 1e-3);
-
-      VAR(Float_t,abs_Zepp)
-      VAR( Char_t,catXS_lepton)
-      VAR( Char_t,catXS_MET)
-      VAR( Char_t,catXS_nbjet)
-      VAR( Char_t,catXS_ttH)
-      VAR( Char_t,catXS_VBF)
-      VAR(Float_t,HT_30)
-      VAR(Float_t,yAbs_yy)
-
-      VAR_1e3(pT_yy)
-      VAR_1e3(pT_yy_JV_30)
-      VAR_1e3(pT_yy_JV_40)
-      VAR_1e3(pT_yy_JV_50)
-      VAR_1e3(pT_yy_JV_60)
-      VAR_1e3(rel_DpT_y_y)
-      VAR_1e3(rel_pT_y1)
-      VAR_1e3(rel_pT_y2)
-      VAR_1e3(rel_sumpT_y_y)
+      VAR(Float_t,abs_Zepp,)
+      VAR( Char_t,catXS_lepton,)
+      VAR( Char_t,catXS_MET,)
+      VAR( Char_t,catXS_nbjet,)
+      VAR( Char_t,catXS_ttH,)
+      VAR( Char_t,catXS_VBF,)
+      VAR(Float_t,yAbs_yy,)
+      VAR(Float_t,HT_30,_1e3)
+      VAR(Float_t,pT_yy,_1e3)
+      VAR(Float_t,pT_yy_JV_30,_1e3)
+      VAR(Float_t,pT_yy_JV_40,_1e3)
+      VAR(Float_t,pT_yy_JV_50,_1e3)
+      VAR(Float_t,pT_yy_JV_60,_1e3)
+      VAR(Float_t,rel_DpT_y_y,_1e3)
+      VAR(Float_t,rel_pT_y1,_1e3)
+      VAR(Float_t,rel_pT_y2,_1e3)
+      VAR(Float_t,rel_sumpT_y_y,_1e3)
 
 #undef VAR
-#undef VAR_1e3
 
       // 1 jet ======================================================
       bool enough_jets = N_j_30 >= 1;
 
-#define VAR(NAME) \
-  const float NAME = enough_jets ? float(*b_##NAME) : fnan; \
+#define VAR(NAME,F) \
+  const float NAME = enough_jets ? float(F(*b_##NAME)) : fnan; \
   f_##NAME.write(NAME); \
-  if (mc) f_##NAME.write(enough_jets ? float(**b_##NAME##_truth) : fnan);
+  if (mc) f_##NAME.write(enough_jets ? float(F(**b_##NAME##_truth)) : fnan);
 
-#define VAR_1e3(NAME) \
-  const float NAME = enough_jets ? float(*b_##NAME * 1e-3) : fnan; \
-  f_##NAME.write(NAME); \
-  if (mc) f_##NAME.write(enough_jets ? float(**b_##NAME##_truth * 1e-3) : fnan);
-
-      VAR(pT_j1_30)
-      VAR(pT_yyj_30)
-      VAR(m_yyj_30)
-      VAR(maxTau_yyj_30)
-      VAR(sumTau_yyj_30)
+      VAR(pT_j1_30,_1e3)
+      VAR(pT_yyj_30,_1e3)
+      VAR(m_yyj_30,_1e3)
+      VAR(maxTau_yyj_30,_1e3)
+      VAR(sumTau_yyj_30,_1e3)
 
       // 2 jets =====================================================
       enough_jets = N_j_30 >= 2;
 
-      VAR(Dphi_j_j_30)
-      VAR(Dphi_j_j_30_signed)
-      VAR(Dphi_yy_jj_30)
+      VAR(Dphi_j_j_30,)
+      VAR(Dphi_j_j_30_signed,)
+      VAR(Dphi_yy_jj_30,)
 
-      VAR_1e3(pT_yyjj_30)
-      VAR_1e3(m_jj_30)
+      VAR(pT_yyjj_30,_1e3)
+      VAR(m_jj_30,_1e3)
 
     } // event loop
   } // file loop
