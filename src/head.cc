@@ -64,14 +64,15 @@ int main(int argc, char** argv) {
   }
   ++m;
 
-  if (!mc)
+  if (!mc) {
     cout << "Luminosity: "
       << (*reinterpret_cast<const float*>(m)) << " ifb\n";
-  m += sizeof(float);
+    m += sizeof(float);
+  }
 
   cout << "N events: "
     << (*reinterpret_cast<const uint64_t*>(m)) << '\n';
-  m += sizeof(uint64_t);
+  // m += sizeof(uint64_t);
 
   ::close(fd);
 }
