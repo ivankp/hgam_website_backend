@@ -5,7 +5,6 @@
 #include <numeric>
 #include <chrono>
 #include <limits>
-// #include <vector>
 
 #include <cstdlib>
 #include <cstring>
@@ -24,6 +23,7 @@ using std::cout;
 using ivan::cat, ivan::error, ivan::cnt_of;
 
 // Global variables =================================================
+const char* data_dir { };
 double data_lumi = 0, lumi = 0, lumi_rat = 1;
 uint64_t nevents_data = 0, nevents_mc = 0;
 double fiducial_myy[] { 105, 160 };
@@ -155,7 +155,7 @@ void read_events(F&& event_f) {
 
     // open file for reading
     f.fd = ::open((f.path = cat(
-      "data/", var_name, mc ? "_mc.dat" : "_data.dat"
+      "data/", data_dir, '/', var_name, mc ? "_mc.dat" : "_data.dat"
     )).c_str(), O_RDONLY);
     if (f.fd < 0) error("failed to open ",f.path);
 
@@ -305,6 +305,10 @@ try {
         lumi = atof(c);
         if (lumi <= 0) lumi = 0;
       }
+    } else if (!strcmp(a,"data")) {
+      if (c && c!=b) {
+        data_dir = c;
+      }
     } else if (!strcmp(a,"fit")) {
       if (c && c!=b) {
         if (ivan::starts_with(c,"ExpPoly")) {
@@ -365,6 +369,7 @@ try {
   }) - vars;
 
   if (nvars==0) error("no variables specified");
+  if (!data_dir) error("no dataset specified");
 
   // Binning ========================================================
   const uniform_axis myy_axis(
@@ -464,7 +469,9 @@ try {
   );
 
   // Fit ============================================================
-  std::stringstream fit_params;
+  std::stringstream fit_params, cov_json;
+  fit_params.precision(8);
+  cov_json.precision(8);
 
   if (!fit_passed) ExpPolyN = 2;
   { const unsigned np = ExpPolyN + 1;
@@ -520,6 +527,14 @@ try {
         fit_params << P[p];
       }
       fit_params << ']';
+
+      if (b) cov_json << ',';
+      cov_json << '[';
+      for (unsigned i=0; i<N; ++i) {
+        if (i) cov_json << ',';
+        cov_json << cov[i];
+      }
+      cov_json << ']';
     }
   }
 
@@ -640,6 +655,9 @@ try {
 
   cout << ","
     "\"fit\":[" << fit_params.rdbuf();
+
+  cout << "],"
+    "\"cov\":[" << cov_json.rdbuf();
 
   cout << "],"
     "\"time\":"
