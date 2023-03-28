@@ -93,6 +93,7 @@ struct nonuniform_axis {
 
 template <typename F> // n ≥ 1
 double simpson(double a, double b, unsigned n, F&& f) {
+  // if (b < a) std::swap(a,b);
   double h = (b-a)/n, h2 = h/2, sum1 = 0, sum2 = f(h2);
   for (unsigned i=1; i<n; ++i) {
     double x = a + h*i;
@@ -107,6 +108,51 @@ double poly(double x, const double* c, unsigned n) {
   double f = *c, y = 1;
   while (++c < end) f += *c*(y*=x);
   return f;
+}
+
+double integral_unc(
+  double d,
+  unsigned n,
+  const double* dA_dc,
+  const double* cov
+) {
+  double uA = 0;
+  for (unsigned i=0; i<n; ++i)
+    for (unsigned j=0; j<=i; ++j, ++cov)
+      uA += dA_dc[i] * dA_dc[j] * (*cov) * (1 << (i!=j));
+
+  return std::sqrt( d*d * uA );
+}
+
+double integral_unc_exppoly(
+  double a,
+  double b,
+  unsigned n,
+  const double* c,
+  const double* cov
+) {
+  // Using very rough trapezoidal approximation
+  // A₁ = 1/2 |f(b) - f(a)| (b-a)
+  // A₂ = (b-a) min(f(b),f(a))
+  // A = (b-a)/2 ( f(a) + f(b) )
+  // ∂A/∂ci = (b-a)/2 ( a^i f(a) + b^i f(b) )
+
+  // TODO: check how much difference Simpson's rule makes
+
+  double fa = std::exp(poly(a,c,n));
+  double fb = std::exp(poly(a,c,n));
+
+  double* const dA_dc = static_cast<double*>(malloc(n*sizeof(double)));
+  for (unsigned i=0;;) {
+    dA_dc[i] = fa + fb;
+    if (!(++i < n)) break;
+    fa *= a;
+    fb *= b;
+  }
+
+  const double uA = integral_unc( (b-a)/2, n, dA_dc, cov );
+  free(dA_dc);
+  return uA;
 }
 
 unsigned is_var(const char* s) {
@@ -406,12 +452,16 @@ try {
 
   const auto [
     data_hist, mc_hist, migration_hist,
-    fit_bkg // background in the signal region form fit to data
+    fit_bkg, // background in the signal region form fit to data
+    bkg_sys,
+    chi2
   ] = ivan::pool<0>(
     cnt_of<data_bin>(nbins_data),
     cnt_of<  mc_bin>(nbins_vars),
     cnt_of<double  >(sq(nbins_vars)),
-    nbins_vars // double is default type
+    nbins_vars, // double is default type
+    nbins_vars,
+    nbins_vars
   );
 
   read_events<false>( // read data
@@ -511,7 +561,9 @@ try {
         }
       }
 
-      linear_least_squares(A, y, u, nb, np, W, P, cov);
+      linear_least_squares(nb, np, A, y, u, W, P, cov);
+
+      chi2[b] = linear_least_squares_chi2(nb, np, A, y, u, P);
 
       fit_bkg[b] = simpson(
         signal_myy[0]-125,
@@ -535,6 +587,14 @@ try {
         cov_json << cov[i];
       }
       cov_json << ']';
+
+      bkg_sys[b] = integral_unc_exppoly(
+        signal_myy[0]-125,
+        signal_myy[1]-125,
+        np,
+        P,
+        cov
+      );
     }
   }
 
@@ -616,7 +676,8 @@ try {
       );
       cout << ',';
 
-      cout << fit_bkg[i] << ',';
+      cout_data_val( fit_bkg[i] );
+      cout << ',';
 
       h += myy_nbins_sides;
       cout_data_val(
@@ -624,6 +685,14 @@ try {
       );
       cout << ']';
     }
+  }
+
+  cout << "],"
+    "\"bkg_sys\":[";
+
+  for (unsigned i=0; i<nbins_vars; ++i) {
+    if (i) cout << ',';
+    cout_data_val( bkg_sys[i] );
   }
 
   cout << "],"
@@ -658,6 +727,14 @@ try {
 
   cout << "],"
     "\"cov\":[" << cov_json.rdbuf();
+
+  cout << "],"
+    "\"chi2\":[";
+
+  for (unsigned i=0; i<nbins_vars; ++i) {
+    if (i) cout << ',';
+    cout << chi2[i];
+  }
 
   cout << "],"
     "\"time\":"
