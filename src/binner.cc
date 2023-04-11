@@ -704,7 +704,8 @@ try {
       cout << "[[";
       for (unsigned j=0; j<myy_nbins_sides; ++j, ++h) {
         if (j) cout << (j != myy_nbins_left ? "," : "],[");
-        cout_data_val( h->n );
+        // cout_data_val( h->n );
+        cout << h->n;
       }
       cout << "]]";
     }
