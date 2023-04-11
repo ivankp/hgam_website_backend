@@ -33,13 +33,13 @@ Every variable requires `branch_reader`s for reco and truth values,
 as well as `write()` function calls for the respective output files inside
 the event loop.
 
-If a variable depends on a certain number of jets, take care to place the
-respective `write()` call or `VAR` macro in a place where `enough_jets` has the
-correct value.
+For variables depending on a certain number of jets, take care to place the
+respective `write()` calls or `VAR` macros in a place where `enough_jets` has
+the correct value.
 
 Note, that `VAR` is a preprocessor macro.
-It avoid a lot of code duplication and easy to make mistakes.
-The meaning of `VAR` is *redefined* several times in the source code.
+It avoids a lot of code duplication and easy to make mistakes.
+The meaning of `VAR` is **redefined** several times in the source code.
 
 # Compilation and setup instructions
 1. Run `make`.
