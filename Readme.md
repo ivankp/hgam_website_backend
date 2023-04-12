@@ -50,6 +50,9 @@ Note, that `VAR` is a preprocessor macro.
 It avoids a lot of code duplication and easy to make mistakes.
 The meaning of `VAR` is **redefined** several times in the source code.
 
+## `head`
+A small program to inspect headers of the `.dat` files.
+
 # Compilation and setup instructions
 1. Run `make`.
 2. Copy the compiled `hgam_website_binning/bin/binner` program to
