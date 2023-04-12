@@ -147,12 +147,19 @@ try {
     cout << argv[i] << '\n';
 
     // Luminosity
-    static const std::regex re(R"((\d+(?:\.\d*)?)ipb\b)");
+    static const std::regex re(R"((\d+(?:\.\d*)?)i([fp])b\b)");
     std::cmatch match;
     if (std::regex_search(argv[i],match,re)) {
       if (i>2 &&  mc) ERROR("data file after mc files");
       mc = false;
-      lumi += atof(match[1].str().c_str());
+      double this_lumi = atof(match.str(1).c_str());
+      const char unit = match.str(2)[0];
+      switch (unit) {
+        case 'p': this_lumi *= 1e-3; break;
+        case 'f': break;
+        default: ERROR("unexpected lumi units \"i",unit,"b\"");
+      }
+      lumi += this_lumi;
     } else {
       if (i>2 && !mc) ERROR("mc file after data files");
       mc = true;
@@ -163,7 +170,7 @@ try {
   if (mc) {
     cout << "Monte Carlo\n\n";
   } else {
-    cout << "Data\nLumi = " << lumi << " ipb\n\n";
+    cout << "Data\nLumi = " << lumi << " ifb\n\n";
   }
 
   // Open output files ==============================================

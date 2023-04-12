@@ -19,12 +19,21 @@ To generate binary files for the observables from MxAODs,
 run the program once for the data files,
 and once for the MC files.
 For example:
-1. `./bin/convert_mxaods data mxaods/data22/data22_100ipb.root`
+1. `./bin/convert_mxaods data mxaods/data22/data22_37.8ifb.root`
 2. `./bin/convert_mxaods data mxaods/NoSys/PhPy8EG_PDF4LHC21_*.root`
 
 The first argument is the output directory where the data files will be
 written.
 The subsequent agruments are names of input MxAOD files.
+
+The data (as oposed to MC) files require the respective luminosity to be
+specified, so that MC weights can be scaled to get the expected number of
+events.
+The program expects luminosity to be specified in the MxAOD file names,
+e.g. `_37.8ifb`.
+If the files on disk don't have the respective luminosities in their names,
+one can make links to them, using a command such as
+`ln -s data.root data_37.8ifb.root`.
 
 In order to modify what observables the program outputs,
 edit the [`convert_mxaods.cc`](./src/convert_mxaods.cc) source code.
