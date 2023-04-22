@@ -515,6 +515,8 @@ try {
     }
   );
 
+  // TODO: fix migration for multiple variables
+
   read_events<true>( // read mc
     [&](double* x){ // read event
       const double myy = x[0];
@@ -542,8 +544,8 @@ try {
         mc_hist[B] += weight;
 
       unsigned b = myy_axis_mc.index(myy);
-      if (b == overflow) return;
-      mc_hist[B+1+b] += weight;
+      if (b != overflow)
+        mc_hist[B+1+b] += weight;
     }
   );
 
