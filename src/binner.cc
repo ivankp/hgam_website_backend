@@ -750,6 +750,22 @@ try {
   }
 
   cout << "],"
+    "\"hist_mc\":[";
+
+  { const auto* h = mc_hist;
+    for (unsigned i=0; i<nbins_vars; ++i) {
+      if (i) cout << ',';
+      cout << '[';
+      ++h; // skip signal region value
+      for (unsigned j=0; j<myy_axis_mc.nbins; ++j, ++h) {
+        if (j) cout << ',';
+        cout << '[' << h->w << ',' << h->w2 << ']';
+      }
+      cout << ']';
+    }
+  }
+
+  cout << "],"
     "\"migration\":[";
 
   for (unsigned i=0, n=sq(nbins_vars); i<n; ++i) {
