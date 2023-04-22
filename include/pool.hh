@@ -1,5 +1,5 @@
-#ifndef IVAN_PULL_HH
-#define IVAN_PULL_HH
+#ifndef IVAN_POOL_HH
+#define IVAN_POOL_HH
 
 #include <cstdlib>
 #include <type_traits>

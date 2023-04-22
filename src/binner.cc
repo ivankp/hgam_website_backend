@@ -28,7 +28,8 @@ double data_lumi = 0, lumi = 0, lumi_rat = 1;
 uint64_t nevents_data = 0, nevents_mc = 0;
 double fiducial_myy[] { 105, 160 };
 double   signal_myy[] { 121, 129 };
-double myy_binwidth = 1;
+double wd = 1;
+double wm = 0.25;
 constexpr unsigned maxnvars = 9;
 unsigned nvars = 0;
 int ExpPolyN = 0;
@@ -351,6 +352,10 @@ try {
         lumi = atof(c);
         if (lumi <= 0) lumi = 0;
       }
+    } else if (!strcmp(a,"wd")) {
+      if (c && c!=b) {
+        wd = std::abs(atof(c));
+      }
     } else if (!strcmp(a,"data")) {
       if (c && c!=b) {
         data_dir = c;
@@ -419,23 +424,23 @@ try {
 
   // Binning ========================================================
   const uniform_axis myy_axis(
-    round((fiducial_myy[1]-fiducial_myy[0])/myy_binwidth),
+    round((fiducial_myy[1]-fiducial_myy[0])/wd),
     fiducial_myy[0],
     fiducial_myy[1]
   );
-  if (myy_binwidth != myy_axis.width) error(
+  if (wd != myy_axis.width) error(
     "m_yy bin width does not fit into the fiducial region "
     "a whole number of times"
   );
 
   // make sure signal region matches bit edges
   const unsigned myy_nbins_left =
-    floor( (signal_myy[0]-fiducial_myy[0])/myy_binwidth );
+    floor( (signal_myy[0]-fiducial_myy[0])/wd );
   const unsigned myy_nbins_right =
-    ceil ( (fiducial_myy[1]-signal_myy[1])/myy_binwidth );
+    ceil ( (fiducial_myy[1]-signal_myy[1])/wd );
 
-  signal_myy[0] = fiducial_myy[0] + myy_nbins_left *myy_binwidth;
-  signal_myy[1] = fiducial_myy[1] - myy_nbins_right*myy_binwidth;
+  signal_myy[0] = fiducial_myy[0] + myy_nbins_left *wd;
+  signal_myy[1] = fiducial_myy[1] - myy_nbins_right*wd;
 
   // exclude signal region bins
   const unsigned myy_nbins_sides  = myy_nbins_left + myy_nbins_right;
@@ -542,7 +547,7 @@ try {
         for (unsigned i=0; i<nb; ++i, ++a) {
           const double x =
             ( ( i<myy_nbins_left ? i : i+myy_nbins_signal ) + 0.5 ) // center
-            * myy_binwidth - (125. - fiducial_myy[0]);
+            * wd - (125. - fiducial_myy[0]);
           *a = *(a-nb) * x;
         }
       }
@@ -570,7 +575,7 @@ try {
         signal_myy[1]-125,
         100,
         [&](double x){ return std::exp(poly( x, P, np )); }
-      );
+      ) / wd;
 
       if (b) fit_params << ',';
       fit_params << '[';
@@ -629,8 +634,10 @@ try {
     "\"m_yy\":{"
       "\"fiducial\":[" << fiducial_myy[0] <<','<< fiducial_myy[1] << "],"
       "\"signal\":[" << signal_myy[0] <<','<< signal_myy[1] << "],"
-      "\"bin_width\":" << myy_binwidth
-      << "},"
+      "\"bin_width\":{"
+        "\"data\":" << wd << ","
+        "\"mc\":" << wm << "}"
+    "},"
     "\"vars\":[";
 
   for (unsigned v=0; v<nvars; ++v) {
