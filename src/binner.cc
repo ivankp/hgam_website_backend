@@ -453,8 +453,13 @@ try {
   const unsigned myy_nbins_right =
     ceil ( (fiducial_myy[1]-signal_myy[1])/wd );
 
-  signal_myy[0] = fiducial_myy[0] + myy_nbins_left *wd;
-  signal_myy[1] = fiducial_myy[1] - myy_nbins_right*wd;
+  if (
+    (signal_myy[0] != fiducial_myy[0] + myy_nbins_left *wd) ||
+    (signal_myy[1] != fiducial_myy[1] - myy_nbins_right*wd)
+  ) error(
+    "m_yy data bin width does not fit into the signal or sideband region "
+    "a whole number of times"
+  );
 
   // exclude signal region bins
   const unsigned myy_nbins_sides  = myy_nbins_left + myy_nbins_right;
