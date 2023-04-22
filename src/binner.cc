@@ -356,6 +356,10 @@ try {
       if (c && c!=b) {
         wd = std::abs(atof(c));
       }
+    } else if (!strcmp(a,"wm")) {
+      if (c && c!=b) {
+        wm = std::abs(atof(c));
+      }
     } else if (!strcmp(a,"data")) {
       if (c && c!=b) {
         data_dir = c;
@@ -423,17 +427,27 @@ try {
   if (!data_dir) error("no dataset specified");
 
   // Binning ========================================================
-  const uniform_axis myy_axis(
+  const uniform_axis myy_axis_data(
     round((fiducial_myy[1]-fiducial_myy[0])/wd),
     fiducial_myy[0],
     fiducial_myy[1]
   );
-  if (wd != myy_axis.width) error(
-    "m_yy bin width does not fit into the fiducial region "
+  if (wd != myy_axis_data.width) error(
+    "m_yy data bin width does not fit into the fiducial region "
     "a whole number of times"
   );
 
-  // make sure signal region matches bit edges
+  const uniform_axis myy_axis_mc(
+    round((fiducial_myy[1]-fiducial_myy[0])/wm),
+    fiducial_myy[0],
+    fiducial_myy[1]
+  );
+  if (wm != myy_axis_mc.width) error(
+    "m_yy MC bin width does not fit into the fiducial region "
+    "a whole number of times"
+  );
+
+  // make sure signal region matches bin edges
   const unsigned myy_nbins_left =
     floor( (signal_myy[0]-fiducial_myy[0])/wd );
   const unsigned myy_nbins_right =
@@ -444,7 +458,7 @@ try {
 
   // exclude signal region bins
   const unsigned myy_nbins_sides  = myy_nbins_left + myy_nbins_right;
-  const unsigned myy_nbins_signal = myy_axis.nbins - myy_nbins_sides;
+  const unsigned myy_nbins_signal = myy_axis_data.nbins - myy_nbins_sides;
 
   unsigned nbins_vars = 1;
   for (unsigned v=nvars; v; ) {
@@ -453,7 +467,15 @@ try {
   const unsigned nbins_data = myy_nbins_sides * nbins_vars;
 
   struct data_bin { unsigned long n=0; };
-  struct   mc_bin { double w=0, w2=0; };
+  struct   mc_bin {
+    double w=0, w2=0;
+
+    [[gnu::always_inline]]
+    inline void operator+=(double w) {
+      this->w  += w;
+      this->w2 += w*w;
+    }
+  };
 
   const auto [
     data_hist, mc_hist, migration_hist,
@@ -462,7 +484,7 @@ try {
     chi2
   ] = ivan::pool<0>(
     cnt_of<data_bin>(nbins_data),
-    cnt_of<  mc_bin>(nbins_vars),
+    cnt_of<  mc_bin>(nbins_vars*(1 + myy_axis_mc.nbins)),
     cnt_of<double  >(sq(nbins_vars)),
     nbins_vars, // double is default type
     nbins_vars,
@@ -482,7 +504,7 @@ try {
           if (b == overflow) return;
           B = B * var.nbins + b;
         }
-        unsigned b = myy_axis.index(myy);
+        unsigned b = myy_axis_data.index(myy);
         if (b == overflow) return;
         if (b > myy_nbins_left) // safe because of myy cut above
           b -= myy_nbins_signal;
@@ -496,7 +518,6 @@ try {
   read_events<true>( // read mc
     [&](double* x){ // read event
       const double myy = x[0];
-      if (!(signal_myy[0] <= myy && myy <= signal_myy[1])) return;
       const double weight = x[1];
       x += 2;
 
@@ -513,13 +534,16 @@ try {
         }
       }
 
-      auto& bin = mc_hist[B];
-      bin.w += weight;
-      bin.w2 += weight * weight;
-
-      if (Bt != overflow) {
+      if (Bt != overflow)
         migration_hist[B*nbins_vars+Bt] += weight;
-      }
+
+      B *= 1 + myy_axis_mc.nbins;
+      if (signal_myy[0] <= myy && myy <= signal_myy[1])
+        mc_hist[B] += weight;
+
+      unsigned b = myy_axis_mc.index(myy);
+      if (b == overflow) return;
+      mc_hist[B+1+b] += weight;
     }
   );
 
@@ -658,7 +682,7 @@ try {
 
   for (unsigned i=0; i<nbins_vars; ++i) {
     if (i) cout << ',';
-    cout_mc_val( mc_hist[i].w );
+    cout_mc_val( mc_hist[i*(1+myy_axis_mc.nbins)].w );
   }
 
   cout << "],"
@@ -666,7 +690,7 @@ try {
 
   for (unsigned i=0; i<nbins_vars; ++i) {
     if (i) cout << ',';
-    cout_mc_val( std::sqrt(mc_hist[i].w2) );
+    cout_mc_val( std::sqrt(mc_hist[i*(1+myy_axis_mc.nbins)].w2) );
   }
 
   cout << "],"
