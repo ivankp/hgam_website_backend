@@ -1,6 +1,6 @@
-# HGam website binning
+# HGam website backend
 This repository contains backend programs for the
-[HGam binnig page](https://github.com/ivankp/hgam_website/tree/main/binning).
+[HGam web tools](https://github.com/ivankp/hgam_website).
 
 ## `binner`
 This is the backend program that the server runs when requests are sent on the
@@ -8,6 +8,8 @@ binning page.
 
 The program directly takes the request query string as a single argument.
 The program reads the necessary binary input files and produces JSON output.
+
+## `event_table`
 
 ## `convert_mxaods`
 This program converts HGam MxAOD ROOT files to binary float dumps of the
