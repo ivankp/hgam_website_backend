@@ -212,12 +212,16 @@ try {
         auto* cut = cuts;
         ivan::serial_split(val,'+',[&](char* val, char* end){
           if (is_vars) {
-            vars[nvars].name = { val, end ? end-val : strlen(val) };
-            if (++nvars > maxncuts) error("too many cuts");
+            if (!(nvars < maxnvars)) error("too many variables");
+            if (
+              (vars[nvars].name = { val, end ? end-val : strlen(val) })
+              .empty()
+            ) error("empty variable name");
+            ++nvars;
           } else { // is_cuts
             switch (i%3) {
               case 0:
-                if (++ncuts > maxncuts) error("too many cuts");
+                if (!(ncuts < maxncuts)) error("too many cuts");
                 cut->name = { val, end ? end-val : strlen(val) };
                 break;
               case 1:
@@ -226,6 +230,7 @@ try {
               case 2:
                 cut->val = atof(val);
                 ++cut;
+                ++ncuts;
                 break;
             }
             ++i;
