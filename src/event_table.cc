@@ -256,29 +256,32 @@ try {
   std::stringstream tab;
   tab.precision(8);
 
-  bool first = true;
-  unsigned noutevents = 1000;
-  read_events( // read data
-    [&](double* xs) -> bool { // read event
-      for (unsigned i=0; i<ncuts; ++i) {
-        const auto& cut = cuts[i];
-        const double x = xs[cut.i];
-        const double v = cut.val;
-        if (!(cut.gt ? x > v : x < v)) return false;
+  { bool first = true;
+    unsigned noutevents = 1000;
+    unsigned event_i = 0;
+    read_events( // read data
+      [&](double* xs) -> bool { // read event
+        ++event_i;
+        for (unsigned i=0; i<ncuts; ++i) {
+          const auto& cut = cuts[i];
+          const double x = xs[cut.i];
+          const double v = cut.val;
+          if (!(cut.gt ? x > v : x < v)) return false;
+        }
+        if (first) first = false;
+        else tab << ',';
+        tab << '[' << event_i;
+        for (unsigned i=0; i<nvars; ++i) {
+          tab << ',';
+          const double x = xs[vars[i].i];
+          if (std::isnan(x)) tab << "null";
+          else tab << x;
+        }
+        tab << ']';
+        return !--noutevents;
       }
-      if (first) first = false;
-      else tab << ',';
-      tab << '[';
-      for (unsigned i=0; i<nvars; ++i) {
-        if (i) tab << ',';
-        const double x = xs[vars[i].i];
-        if (std::isnan(x)) tab << "null";
-        else tab << x;
-      }
-      tab << ']';
-      return !--noutevents;
-    }
-  );
+    );
+  }
 
   // JSON response ==================================================
   cout << "{"
