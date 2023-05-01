@@ -19,9 +19,12 @@ EXE := $(shell $(FIND_MAIN))
 
 all: $(EXE)
 
-.build/binner.o: CPPSTD = c++17
+# .build/binner.o: CPPSTD = c++17
 bin/binner: LDFLAGS += -static -static-libgcc -static-libstdc++
 bin/binner: .build/linalg.o .build/least_squares.o
+
+# .build/event_table.o: CPPSTD = c++17
+bin/event_table: LDFLAGS += -static -static-libgcc -static-libstdc++
 
 .build/head.o: CPPSTD = c++17
 

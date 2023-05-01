@@ -14,6 +14,7 @@
 #include <fcntl.h>
 
 #include "least_squares.h"
+#include "serial_parsing.hh"
 #include "pool.hh"
 #include "numconv.hh"
 #include "error.hh"
@@ -274,7 +275,7 @@ void read_events(F&& event_f) {
   }
 
   uint64_t nevents_total = 0;
-  double event[sizeof(double)*2*maxnvars];
+  double event[maxnvars*2];
   for (;;) { // read data file in chunks of buffer size
     unsigned nevents = -1;
     for (unsigned v=0; v<=nvars; ++v) {
@@ -322,8 +323,9 @@ void read_events(F&& event_f) {
     }
   } // for ;;
   if (nevents_total != (mc ? nevents_mc : nevents_data)) error(
-    (mc?"mc":"data")," contains ",(mc ? nevents_mc : nevents_data)," events"
-    ", but ",nevents_total," were read"
+    (mc?"mc":"data")," was expected to contain ",
+    (mc ? nevents_mc : nevents_data)," events, "
+    "but ",nevents_total," were read"
   );
 }
 
@@ -341,83 +343,69 @@ try {
 
   // parse query string =============================================
   bool fit_passed = false;
-  for (char *a=argv[1], *b=a, *c{};;) {
-    b = strchr(a,'&');
-    if (b) *b = '\0';
+  ivan::serial_split(argv[1],'&',[&](char* key, char* end){
+    char* val = strchr(key,'=');
+    if (val) {
+      if (val == end) return; // assumes all keys must have values
+      *val = '\0';
+      ++val;
+    } else return;
+    if (!strcmp(key,"lumi")) {
+      lumi = atof(val);
+      if (lumi <= 0) lumi = 0;
+    } else if (!strcmp(key,"wd")) {
+      wd = std::abs(atof(val));
+    } else if (!strcmp(key,"wm")) {
+      wm = std::abs(atof(val));
+    } else if (!strcmp(key,"data")) {
+      data_dir = val;
+    } else if (!strcmp(key,"fit")) {
+      if (ivan::starts_with(val,"ExpPoly")) {
+        val += 7;
+        const char d = *val;
+        if (d < '0' || '5' < d || val[1]!='\0') error(
+          "invalid ExpPoly fit function degree ",val
+        );
+        ExpPolyN = d - '0';
+        fit_passed = true;
+      } else error("invalid fit function ",val);
+    } else if (const unsigned xi = is_var(key)) {
+      auto& var = vars[xi-1];
 
-    c = strchr(a,'=');
-    if (c) { *c = '\0'; ++c; }
-    if (!strcmp(a,"lumi")) {
-      if (c && c!=b) {
-        lumi = atof(c);
-        if (lumi <= 0) lumi = 0;
+      int i = 0;
+      for (char *b=val;; ++b) { // find number of edges
+        char k = *b;
+        if (!k) break;
+        if (k=='+') ++i;
       }
-    } else if (!strcmp(a,"wd")) {
-      if (c && c!=b) {
-        wd = std::abs(atof(c));
-      }
-    } else if (!strcmp(a,"wm")) {
-      if (c && c!=b) {
-        wm = std::abs(atof(c));
-      }
-    } else if (!strcmp(a,"data")) {
-      if (c && c!=b) {
-        data_dir = c;
-      }
-    } else if (!strcmp(a,"fit")) {
-      if (c && c!=b) {
-        if (ivan::starts_with(c,"ExpPoly")) {
-          c += 7;
-          const char d = *c;
-          if (d < '0' || '5' < d || c[1]!='\0') error(
-            "invalid ExpPoly fit function degree ",c
-          );
-          ExpPolyN = d - '0';
-          fit_passed = true;
-        } else error("invalid fit function ",c);
-      }
-    } else if (const unsigned xi = is_var(a)) {
-      if (c && c!=b) {
-        auto& var = vars[xi-1];
-
-        int i = 0;
-        for (char *b=c;; ++b) { // find number of edges
-          char k = *b;
-          if (!k) break;
-          if (k=='+') ++i;
-        }
-        double* edges = static_cast<double*>(malloc(i*sizeof(double)));
-        i = -1;
-        for (char *a=c, *b=a;; ++b) { // parse edges
-          char k = *b;
-          if (!k || k=='+') {
-            *b = '\0';
-            if (b!=a) {
-              if (i < 0) var.name = a;
-              else edges[i] = atof(a);
-              ++i;
-            }
-            a = b+1;
-            if (!k) break;
+      double* edges = static_cast<double*>(malloc(i*sizeof(double)));
+      i = -1;
+      for (char *a=val, *b=a;; ++b) { // parse edges
+        char k = *b;
+        if (!k || k=='+') {
+          *b = '\0';
+          if (b!=a) {
+            if (i < 0) var.name = a;
+            else edges[i] = atof(a);
+            ++i;
           }
+          a = b+1;
+          if (!k) break;
         }
-
-        if (i < 0) error("missing variable name");
-        if (i < 1) error("missing edges for ",var.name);
-
-        std::sort( edges, edges+i );
-        i = std::unique( edges, edges+i ) - edges;
-
-        if (i < 2) error("fewer than 2 edges for ",var.name);
-
-        var.edges = edges;
-        var.nbins = i-1;
       }
-    }
 
-    if (!b) break;
-    a = b+1;
-  }
+      if (i < 0) error("missing variable name");
+      if (i < 1) error("missing edges for ",var.name);
+
+      std::sort( edges, edges+i );
+      i = std::unique( edges, edges+i ) - edges;
+
+      if (i < 2) error("fewer than 2 edges for ",var.name);
+
+      var.edges = edges;
+      var.nbins = i-1;
+    }
+  });
 
   nvars = std::remove_if(vars,vars+maxnvars,[](const auto& var){
     return var.name.empty();
@@ -778,10 +766,10 @@ try {
       << "\"ExpPoly" << ExpPolyN << "\"";
 
   cout << ","
-    "\"fit\":[" << fit_params.rdbuf();
+    "\"fit\":[" << fit_params.view();
 
   cout << "],"
-    "\"cov\":[" << cov_json.rdbuf();
+    "\"cov\":[" << cov_json.view();
 
   cout << "],"
     "\"chi2\":[";
