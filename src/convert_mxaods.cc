@@ -36,10 +36,13 @@ double mc_factor = 0;
 
 template <typename T> constexpr char type_byte = '\0';
 // https://docs.python.org/3/library/struct.html#format-characters
-template <> constexpr char type_byte<float  > = 'f';
-template <> constexpr char type_byte<int32_t> = 'i';
-template <> constexpr char type_byte<uint8_t> = 'B';
-template <> constexpr char type_byte<char   > = 'c';
+template <> constexpr char type_byte<float   > = 'f';
+template <> constexpr char type_byte<char    > = 'c';
+template <> constexpr char type_byte< uint8_t> = 'B';
+template <> constexpr char type_byte< int32_t> = 'i';
+template <> constexpr char type_byte<uint32_t> = 'I';
+template <> constexpr char type_byte< int64_t> = 'q';
+template <> constexpr char type_byte<uint64_t> = 'Q';
 
 template <typename To, typename From>
 To ceiling_cast(From x) noexcept {
@@ -54,26 +57,24 @@ char* bufcpy(char* m, T x) noexcept {
 }
 
 template <typename T>
-class output_file {
+struct output_file {
   std::filesystem::path path;
-  const int fd;
-  char* const buf;
-  char* m;
-  off_t skipped;
+  int fd = -1;
+  char* buf = nullptr;
+  char* m = nullptr;
+  off_t skipped = 0;
+  bool absent_var = false;
 
   static constexpr size_t buflen = 1 << 20;
 
-public:
-  output_file(std::string_view name)
-  : path(dir/cat(name, mc ? "_mc" : "_data", ".dat")),
-    fd([this]{
-      int fd = ::open(path.c_str(), O_CREAT|O_WRONLY|O_TRUNC, 0644);
-      if (fd < 0) ERROR('\"',path.native(),"\": open(): ",strerror(errno));
-      return fd;
-    }()),
-    buf( static_cast<char*>( ::malloc(buflen) ) ),
-    m(buf)
-  {
+  output_file() { }
+  void open(std::string_view name) {
+    path = dir / cat(name, mc ? "_mc" : "_data", ".dat");
+    fd = ::open(path.c_str(), O_CREAT|O_WRONLY|O_TRUNC, 0644);
+    if (fd < 0) ERROR('\"',path.native(),"\": open(): ",strerror(errno));
+    buf = static_cast<char*>( ::malloc(buflen) );
+    m = buf;
+
     const size_t skip = 2ul + (!mc ? sizeof(lumi) : 0ul) + sizeof(nevents);
     const size_t nulls = 8-((name.size()+skip)%8);
     const size_t bufneed = name.size()+nulls+skip;
@@ -93,18 +94,35 @@ public:
     skipped = (m+2) - buf;
     m += skip;
   }
+  void remove() {
+    if (fd >= 0) {
+      cerr << "\033[31m" "removing output file " << path << "\033[0m" << endl;
+      ::close(fd);
+      fd = -1;
+      ::free(buf);
+      buf = nullptr;
+      m = nullptr;
+      std::filesystem::remove(path);
+      path.clear();
+    }
+  }
+  operator bool() const noexcept {
+    return fd >= 0;
+  }
   ~output_file() {
-    flush();
-    if (!mc) m = bufcpy(m,lumi);
-    m = bufcpy(m,nevents);
-    if ((
-      ::lseek(fd,skipped,SEEK_SET)
-    ) < 0) ERROR('\"',path.native(),"\": lseek(): ",strerror(errno));
-    if ((
-      ::write(fd,buf,m-buf)
-    ) < 0) ERROR('\"',path.native(),"\": write(): ",strerror(errno));
-    ::close(fd);
-    ::free(buf);
+    if (fd >= 0) {
+      flush();
+      if (!mc) m = bufcpy(m,lumi);
+      m = bufcpy(m,nevents);
+      if ((
+        ::lseek(fd,skipped,SEEK_SET)
+      ) < 0) ERROR('\"',path.native(),"\": lseek(): ",strerror(errno));
+      if ((
+        ::write(fd,buf,m-buf)
+      ) < 0) ERROR('\"',path.native(),"\": write(): ",strerror(errno));
+      ::close(fd);
+      ::free(buf);
+    }
   }
 
   void write(const char* s, size_t n) {
@@ -177,7 +195,11 @@ try {
   std::filesystem::create_directories(dir = argv[1]);
   cout << "Output files:\n";
 
-  output_file<uint8_t> f_N_j_30("N_j_30");
+  output_file<uint8_t> f_N_j_30;
+  output_file<Float_t> f_m_yy;
+
+  output_file<uint32_t> f_runNumber;
+  output_file<uint64_t> f_eventNumber;
 
 // https://en.wikipedia.org/wiki/X_Macro
 #define VARS \
@@ -192,7 +214,6 @@ try {
   VAR(Float_t,Dphi_yy_jj_30) \
   VAR(Float_t,HT_30) \
   VAR(Float_t,m_jj_30) \
-  VAR(Float_t,m_yy) \
   VAR(Float_t,m_yyj_30) \
   VAR(Float_t,maxTau_yyj_30) \
   VAR(Float_t,pT_j1_30) \
@@ -211,7 +232,7 @@ try {
   VAR(Float_t,yAbs_yy)
 
 #define VAR(TYPE,NAME) \
-  output_file<TYPE> f_##NAME(#NAME);
+  output_file<TYPE> f_##NAME;
 
     VARS
 
@@ -238,6 +259,7 @@ try {
     }
 
     TTreeReader reader("CollectionTree",&file);
+    auto* const tree = reader.GetTree();
 
 #define VAR_PREF "HGamEventInfoAuxDyn."
 #define VAR_PREF_TRUTH "HGamTruthEventInfoAuxDyn."
@@ -254,10 +276,29 @@ try {
       b_weight.emplace(reader, VAR_PREF "weight");
     }
 
+    branch_reader<Float_t> b_m_yy(reader, VAR_PREF "m_yy");
+    f_m_yy.open("m_yy");
+
 #define VAR(TYPE,NAME) \
-  branch_reader<TYPE> b_##NAME(reader, VAR_PREF #NAME); \
-  std::optional<branch_reader<TYPE>> b_##NAME##_truth; \
-  if (mc) b_##NAME##_truth.emplace(reader, VAR_PREF_TRUTH #NAME);
+  std::optional<branch_reader<TYPE>> b_##NAME, b_##NAME##_truth; \
+  if (!f_##NAME.absent_var) { \
+    auto& f = f_##NAME; \
+    bool absent_branches = false; \
+    const char* name[] = { VAR_PREF #NAME, VAR_PREF_TRUTH #NAME }; \
+    for (int i=0; i<(mc?2:1); ++i) \
+      if (!tree->FindBranch(name[i])) { \
+        cerr << "\033[31m" "missing branch " << name[i] << "\033[0m" << endl; \
+        absent_branches = true; \
+      } \
+    if (!absent_branches) { \
+      b_##NAME.emplace(reader, name[0]); \
+      if (mc) b_##NAME##_truth.emplace(reader, name[1]); \
+      if (!f) f.open(#NAME); \
+    } else { \
+      if (f) f.remove(); \
+      f.absent_var = true; \
+    } \
+  }
 
     VAR(Int_t,N_j_30)
 
@@ -265,6 +306,29 @@ try {
 
 #undef VAR
 #undef VARS
+
+#define VAR(TYPE,NAME) \
+  std::optional<branch_reader<TYPE>> b_##NAME; \
+  if (!mc && !f_##NAME.absent_var) { \
+    auto& f = f_##NAME; \
+    const char* name = VAR_PREF #NAME; \
+    if (tree->FindBranch(name)) { \
+      b_##NAME.emplace(reader, name); \
+      if (!f) f.open(#NAME); \
+    } else { \
+      cerr << "\033[31m" "missing branch " << name << "\033[0m" << endl; \
+      if (f) f.remove(); \
+      f.absent_var = true; \
+    } \
+  }
+
+  VAR(UInt_t,runNumber)
+  VAR(ULong64_t,eventNumber)
+
+  static_assert( sizeof(UInt_t) == sizeof(uint32_t) );
+  static_assert( sizeof(ULong64_t) == sizeof(uint64_t) );
+
+#undef VAR
 
     // LOOP over events =============================================
     double weight;
@@ -288,22 +352,28 @@ try {
       ++nevents;
 
       f_m_yy.write(m_yy);
-      if (mc) f_m_yy.write<float>( // weight
-        weight * double(**b_cs_br_fe) * mc_factor
-      );
+      if (mc) {
+        f_m_yy.write<float>( // weight
+          weight * double(**b_cs_br_fe) * mc_factor
+        );
+      } else {
+        if (f_runNumber  ) f_runNumber  .write<uint32_t>( **b_runNumber   );
+        if (f_eventNumber) f_eventNumber.write<uint64_t>( **b_eventNumber );
+      }
       // TODO: weightCatXS
 
       // ============================================================
-      const uint8_t N_j_30 = ceiling_cast<uint8_t>(*b_N_j_30);
+      const uint8_t N_j_30 = ceiling_cast<uint8_t>(**b_N_j_30);
       f_N_j_30.write(N_j_30);
       if (mc) f_N_j_30.write(ceiling_cast<uint8_t>(**b_N_j_30_truth));
 
 #define _1e3(X) (X)*1e-3
 
 #define VAR(TYPE,NAME,F) \
-  const TYPE NAME = F(*b_##NAME); \
-  f_##NAME.write(NAME); \
-  if (mc) f_##NAME.write<TYPE>(F(**b_##NAME##_truth));
+  if (auto& f = f_##NAME) { \
+    f.write<TYPE>(F(**b_##NAME)); \
+    if (mc) f.write<TYPE>(F(**b_##NAME##_truth)); \
+  }
 
       VAR(Float_t,abs_Zepp,)
       VAR( Char_t,catXS_lepton,)
@@ -329,9 +399,10 @@ try {
       bool enough_jets = N_j_30 >= 1;
 
 #define VAR(NAME,F) \
-  const float NAME = enough_jets ? float(F(*b_##NAME)) : fnan; \
-  f_##NAME.write(NAME); \
-  if (mc) f_##NAME.write(enough_jets ? float(F(**b_##NAME##_truth)) : fnan);
+  if (auto& f = f_##NAME) { \
+    f.write(enough_jets ? float(F(**b_##NAME)) : fnan); \
+    if (mc) f.write(enough_jets ? float(F(**b_##NAME##_truth)) : fnan); \
+  }
 
       VAR(pT_j1_30,_1e3)
       VAR(pT_yyj_30,_1e3)
