@@ -24,6 +24,8 @@
 using std::cout, std::cerr, std::endl;
 using ivan::cat, ivan::branch_reader;
 
+static_assert( std::is_same_v<float,Float_t> );
+
 #define ERROR(...) ivan::error(__FILE__ ":" STR(__LINE__) ": ",__VA_ARGS__)
 
 constexpr float fnan = std::numeric_limits<float>::quiet_NaN();
@@ -231,10 +233,24 @@ try {
   VAR(Float_t,sumTau_yyj_30) \
   VAR(Float_t,yAbs_yy)
 
+#define WEIGHTS \
+    VAR(weightJvt_30) \
+    VAR(weightCatXS_lepton) \
+    VAR(weightCatXS_nbjet) \
+    VAR(weightCatXS_ttH) \
+    VAR(weightCatXS_VBF)
+
 #define VAR(TYPE,NAME) \
   output_file<TYPE> f_##NAME;
 
     VARS
+
+#undef VAR
+
+#define VAR(NAME) \
+  output_file<Float_t> f_##NAME;
+
+    WEIGHTS
 
 #undef VAR
 
@@ -311,6 +327,29 @@ try {
   std::optional<branch_reader<TYPE>> b_##NAME; \
   if (!mc && !f_##NAME.absent_var) { \
     auto& f = f_##NAME; \
+    const char* name = "EventInfoAux." #NAME; \
+    if (tree->FindBranch(name)) { \
+      b_##NAME.emplace(reader, name); \
+      if (!f) f.open(#NAME); \
+    } else { \
+      cerr << "\033[31m" "missing branch " << name << "\033[0m" << endl; \
+      if (f) f.remove(); \
+      f.absent_var = true; \
+    } \
+  }
+
+    static_assert( sizeof(UInt_t) == sizeof(uint32_t) );
+    static_assert( sizeof(ULong64_t) == sizeof(uint64_t) );
+
+    VAR(UInt_t,runNumber)
+    VAR(ULong64_t,eventNumber)
+
+#undef VAR
+
+#define VAR(NAME) \
+  std::optional<branch_reader<Float_t>> b_##NAME; \
+  if (mc && !f_##NAME.absent_var) { \
+    auto& f = f_##NAME; \
     const char* name = VAR_PREF #NAME; \
     if (tree->FindBranch(name)) { \
       b_##NAME.emplace(reader, name); \
@@ -322,11 +361,7 @@ try {
     } \
   }
 
-  VAR(UInt_t,runNumber)
-  VAR(ULong64_t,eventNumber)
-
-  static_assert( sizeof(UInt_t) == sizeof(uint32_t) );
-  static_assert( sizeof(ULong64_t) == sizeof(uint64_t) );
+    WEIGHTS
 
 #undef VAR
 
@@ -356,6 +391,13 @@ try {
         f_m_yy.write<float>( // weight
           weight * double(**b_cs_br_fe) * mc_factor
         );
+
+#define VAR(NAME) \
+  if (auto& f = f_##NAME) f.write( **b_##NAME );
+
+        WEIGHTS
+
+#undef VAR
       } else {
         if (f_runNumber  ) f_runNumber  .write<uint32_t>( **b_runNumber   );
         if (f_eventNumber) f_eventNumber.write<uint64_t>( **b_eventNumber );
