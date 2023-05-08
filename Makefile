@@ -6,7 +6,7 @@ CFLAGS := -Wall -O3 -flto
 # CFLAGS := -Wall -Og -g
 CFLAGS += -fmax-errors=3 -Iinclude
 # CFLAGS += -DNDEBUG
-CPPSTD := c++20
+CPPSTD := c++17
 
 # generate .d files during compilation
 DEPFLAGS = -MT $@ -MMD -MP -MF .build/$*.d
@@ -19,14 +19,10 @@ EXE := $(shell $(FIND_MAIN))
 
 all: $(EXE)
 
-# .build/binner.o: CPPSTD = c++17
 bin/binner: LDFLAGS += -static -static-libgcc -static-libstdc++
 bin/binner: .build/linalg.o .build/least_squares.o
 
-# .build/event_table.o: CPPSTD = c++17
 bin/event_table: LDFLAGS += -static -static-libgcc -static-libstdc++
-
-.build/head.o: CPPSTD = c++17
 
 ifneq (, $(shell which root-config))
 ROOT_CFLAGS  := $(shell root-config --cflags | sed 's/ -std=c++[^ ]\+ / /')

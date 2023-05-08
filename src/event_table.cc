@@ -21,6 +21,12 @@
 using std::cout;
 using ivan::cat, ivan::error, ivan::cnt_of;
 
+template <typename Out, typename In>
+void print_stream(Out& out, In& in) {
+  auto* const rdbuf = in.rdbuf();
+  if (rdbuf) out << rdbuf;
+}
+
 size_t round_down(size_t x, size_t n) noexcept { return x-(x%n); }
 
 template <typename It, typename T>
@@ -310,9 +316,11 @@ try {
   cout <<
       "]"
     "},"
-    "\"events\":["
+    "\"events\":[";
       // << tab.rdbuf() <<
-      << tab.view() <<
+      // << tab.view() <<
+  print_stream(cout,tab);
+  cout <<
     "],"
     "\"time\":"
       << std::setprecision(3)

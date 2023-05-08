@@ -36,6 +36,12 @@ unsigned nvars = 0;
 int ExpPolyN = 0;
 // ==================================================================
 
+template <typename Out, typename In>
+void print_stream(Out& out, In& in) {
+  auto* const rdbuf = in.rdbuf();
+  if (rdbuf) out << rdbuf;
+}
+
 size_t round_down(size_t x, size_t n) noexcept { return x-(x%n); }
 
 template <typename T>
@@ -766,10 +772,14 @@ try {
       << "\"ExpPoly" << ExpPolyN << "\"";
 
   cout << ","
-    "\"fit\":[" << fit_params.view();
+    "\"fit\":[";
+  // << fit_params.view();
+  print_stream(cout,fit_params);
 
   cout << "],"
-    "\"cov\":[" << cov_json.view();
+    "\"cov\":[";
+  // << cov_json.view();
+  print_stream(cout,cov_json);
 
   cout << "],"
     "\"chi2\":[";

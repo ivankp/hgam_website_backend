@@ -139,7 +139,7 @@ struct output_file {
     }
   }
   template <typename U>
-  void write(U x) requires(std::is_same_v<U,T>) {
+  auto write(U x) -> std::enable_if_t<std::is_same_v<U,T>> {
     static_assert( sizeof(x) < buflen );
     if (buf + buflen < m + sizeof(x)) flush();
     m = bufcpy(m,x);
@@ -231,7 +231,22 @@ try {
   VAR(Float_t,rel_pT_y2) \
   VAR(Float_t,rel_sumpT_y_y) \
   VAR(Float_t,sumTau_yyj_30) \
-  VAR(Float_t,yAbs_yy)
+  VAR(Float_t,yAbs_yy) \
+  \
+  VAR(Float_t,cosTS_yy) \
+  VAR(Float_t,cosTS_yyjj) \
+  VAR(Float_t,Dphi_y_y) \
+  VAR(Float_t,Dy_j_j_30) \
+  VAR(Float_t,Dy_y_y) \
+  VAR(Float_t,Dy_yy_jj_30) \
+  VAR(Float_t,HTall_30) \
+  VAR(Float_t,m_yyjj) \
+  VAR(Float_t,pT_j2_30) \
+  VAR(Float_t,pT_j3_30) \
+  VAR(Float_t,pT_jj) \
+  VAR(Float_t,pTt_yy) \
+  VAR(Float_t,yAbs_j1_30) \
+  VAR(Float_t,yAbs_j2_30)
 
 #define WEIGHTS \
     VAR(weightJvt_30) \
@@ -402,7 +417,6 @@ try {
         if (f_runNumber  ) f_runNumber  .write<uint32_t>( **b_runNumber   );
         if (f_eventNumber) f_eventNumber.write<uint64_t>( **b_eventNumber );
       }
-      // TODO: weightCatXS
 
       // ============================================================
       const uint8_t N_j_30 = ceiling_cast<uint8_t>(**b_N_j_30);
@@ -435,6 +449,12 @@ try {
       VAR(Float_t,rel_pT_y2,_1e3)
       VAR(Float_t,rel_sumpT_y_y,_1e3)
 
+      VAR(Float_t,cosTS_yy,)
+      VAR(Float_t,Dphi_y_y,)
+      VAR(Float_t,Dy_y_y,)
+      VAR(Float_t,pTt_yy,_1e3)
+      VAR(Float_t,HTall_30,_1e3)
+
 #undef VAR
 
       // 1 jet ======================================================
@@ -452,6 +472,8 @@ try {
       VAR(maxTau_yyj_30,_1e3)
       VAR(sumTau_yyj_30,_1e3)
 
+      VAR(yAbs_j1_30,)
+
       // 2 jets =====================================================
       enough_jets = N_j_30 >= 2;
 
@@ -461,6 +483,19 @@ try {
 
       VAR(pT_yyjj_30,_1e3)
       VAR(m_jj_30,_1e3)
+
+      VAR(cosTS_yyjj,)
+      VAR(Dy_j_j_30,)
+      VAR(Dy_yy_jj_30,)
+      VAR(m_yyjj,_1e3)
+      VAR(pT_j2_30,_1e3)
+      VAR(pT_jj,_1e3)
+      VAR(yAbs_j2_30,)
+
+      // 3 jets =====================================================
+      enough_jets = N_j_30 >= 3;
+
+      VAR(pT_j3_30,_1e3)
 
     } // event loop
   } // file loop
