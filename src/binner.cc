@@ -363,7 +363,7 @@ try {
       wd = std::abs(atof(val));
     } else if (!strcmp(key,"wm")) {
       wm = std::abs(atof(val));
-    } else if (!strcmp(key,"data")) {
+    } else if (!strcmp(key,"ds")) {
       data_dir = val;
     } else if (!strcmp(key,"fit")) {
       if (ivan::starts_with(val,"ExpPoly")) {
