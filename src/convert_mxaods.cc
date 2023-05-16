@@ -107,6 +107,7 @@ struct output_file {
       std::filesystem::remove(path);
       path.clear();
     }
+    absent_var = true;
   }
   operator bool() const noexcept {
     return fd >= 0;
@@ -199,6 +200,7 @@ try {
 
   output_file<uint8_t> f_N_j_30;
   output_file<Float_t> f_m_yy;
+  output_file<Float_t> f_pT_y1, f_pT_y2;
 
   output_file<uint32_t> f_runNumber;
   output_file<uint64_t> f_eventNumber;
@@ -310,6 +312,9 @@ try {
     branch_reader<Float_t> b_m_yy(reader, VAR_PREF "m_yy");
     f_m_yy.open("m_yy");
 
+    std::optional<branch_reader<Float_t>> b_m_yy_truth;
+    if (mc) b_m_yy_truth.emplace(reader, VAR_PREF_TRUTH "m_yy");
+
 #define VAR(TYPE,NAME) \
   std::optional<branch_reader<TYPE>> b_##NAME, b_##NAME##_truth; \
   if (!f_##NAME.absent_var) { \
@@ -327,7 +332,6 @@ try {
       if (!f) f.open(#NAME); \
     } else { \
       if (f) f.remove(); \
-      f.absent_var = true; \
     } \
   }
 
@@ -349,7 +353,6 @@ try {
     } else { \
       cerr << "\033[31m" "missing branch " << name << "\033[0m" << endl; \
       if (f) f.remove(); \
-      f.absent_var = true; \
     } \
   }
 
@@ -372,13 +375,29 @@ try {
     } else { \
       cerr << "\033[31m" "missing branch " << name << "\033[0m" << endl; \
       if (f) f.remove(); \
-      f.absent_var = true; \
     } \
   }
 
     WEIGHTS
 
 #undef VAR
+
+  if (!f_pT_y1.absent_var) {
+    auto& f = f_pT_y1;
+    if ( b_rel_pT_y1 && (!mc || ( b_rel_pT_y1_truth && b_m_yy_truth)) ) {
+      if (!f) f.open("pT_y1");
+    } else {
+      if (f) f.remove();
+    }
+  }
+  if (!f_pT_y2.absent_var) {
+    auto& f = f_pT_y2;
+    if ( b_rel_pT_y2 && (!mc || ( b_rel_pT_y2_truth && b_m_yy_truth)) ) {
+      if (!f) f.open("pT_y2");
+    } else {
+      if (f) f.remove();
+    }
+  }
 
     // LOOP over events =============================================
     double weight;
@@ -396,12 +415,12 @@ try {
       }
 
       // diphoton mass cut
-      const float m_yy = *b_m_yy*1e-3;
+      const double m_yy = *b_m_yy*1e-3;
       if (m_yy < 105 || 160 < m_yy) continue;
 
       ++nevents;
 
-      f_m_yy.write(m_yy);
+      f_m_yy.write<float>(m_yy);
       if (mc) {
         f_m_yy.write<float>( // weight
           weight * double(**b_cs_br_fe) * mc_factor
@@ -444,10 +463,10 @@ try {
       VAR(Float_t,pT_yy_JV_40,_1e3)
       VAR(Float_t,pT_yy_JV_50,_1e3)
       VAR(Float_t,pT_yy_JV_60,_1e3)
-      VAR(Float_t,rel_DpT_y_y,_1e3)
-      VAR(Float_t,rel_pT_y1,_1e3)
-      VAR(Float_t,rel_pT_y2,_1e3)
-      VAR(Float_t,rel_sumpT_y_y,_1e3)
+      VAR(Float_t,rel_DpT_y_y,)
+      VAR(Float_t,rel_pT_y1,)
+      VAR(Float_t,rel_pT_y2,)
+      VAR(Float_t,rel_sumpT_y_y,)
 
       VAR(Float_t,cosTS_yy,)
       VAR(Float_t,Dphi_y_y,)
@@ -456,6 +475,15 @@ try {
       VAR(Float_t,HTall_30,_1e3)
 
 #undef VAR
+
+      if (auto& f = f_pT_y1) {
+        f.write<float>(m_yy * **b_rel_pT_y1);
+        if (mc) f.write<float>(**b_m_yy_truth * **b_rel_pT_y1_truth);
+      }
+      if (auto& f = f_pT_y2) {
+        f.write<float>(m_yy * **b_rel_pT_y2);
+        if (mc) f.write<float>(**b_m_yy_truth * **b_rel_pT_y2_truth);
+      }
 
       // 1 jet ======================================================
       bool enough_jets = N_j_30 >= 1;
