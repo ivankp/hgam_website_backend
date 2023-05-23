@@ -13,19 +13,19 @@
 
 namespace ivan {
 
-#if __cplusplus < 202002L
-template <typename T, typename=void>
-#else
+#if __cpp_concepts >= 201907L
 template <typename T>
+#else
+template <typename T, typename=void>
 #endif
 struct xtos { };
 
 template <typename T>
-#if __cplusplus < 202002L
-struct xtos<T,std::enable_if_t<std::is_arithmetic_v<T>>>
-#else
+#if __cpp_concepts >= 201907L
 requires std::is_arithmetic_v<T>
 struct xtos<T>
+#else
+struct xtos<T,std::enable_if_t<std::is_arithmetic_v<T>>>
 #endif
 {
 #ifdef IVAN_CHARCONV_EXISTS
@@ -65,10 +65,10 @@ xtos(T x) -> xtos<T>;
 namespace ivan {
 
 template <typename T>
-#if __cplusplus < 202002L
-std::enable_if_t<std::is_arithmetic_v<T>,T>
-#else
+#if __cpp_concepts >= 201907L
 requires std::is_arithmetic_v<T> T
+#else
+std::enable_if_t<std::is_arithmetic_v<T>,T>
 #endif
 
 stox(std::string_view s) {
